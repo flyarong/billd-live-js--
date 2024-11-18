@@ -1,8 +1,6 @@
 import { getRandomString } from 'billd-utils';
 
-import { LiveLineEnum } from '@/interface';
 import { prodDomain } from '@/spec-config';
-import { useAppStore } from '@/store/app';
 import { useNetworkStore } from '@/store/network';
 import { WsCandidateType, WsMsgTypeEnum } from '@/types/websocket';
 
@@ -39,6 +37,7 @@ export class WebRTCClass {
   roomId = '-1';
   sender = '';
   receiver = '';
+  sucessCb;
 
   videoEl: HTMLVideoElement;
 
@@ -61,7 +60,19 @@ export class WebRTCClass {
 
   rtt = -1;
 
+  outboundFps = -1;
+  inboundFps = -1;
+
+  getStatsDelay = 1000;
   loopGetStatsTimer: any = null;
+
+  preBytesSent = 0;
+  /** 发送码率，单位kb/s */
+  bytesSent = 0;
+
+  preBytesReceived = 0;
+  /** 接收码率，单位kb/s */
+  bytesReceived = 0;
 
   constructor(data: {
     roomId: string;
@@ -72,12 +83,14 @@ export class WebRTCClass {
     isSRS: boolean;
     sender: string;
     receiver: string;
+    sucessCb?: any;
   }) {
     this.roomId = data.roomId;
     this.videoEl = data.videoEl;
     // document.body.appendChild(this.videoEl);
     this.sender = data.sender;
     this.receiver = data.receiver;
+    this.sucessCb = data.sucessCb;
     if (data.maxBitrate) {
       this.maxBitrate = data.maxBitrate;
     }
@@ -94,63 +107,41 @@ export class WebRTCClass {
   }
 
   loopGetStats = () => {
-    const previousTimestamp = 0; // 初始化上一次获取码率信息的时间
-
     this.loopGetStatsTimer = setInterval(async () => {
       if (!this.peerConnection) return;
       try {
         const res = await this.peerConnection.getStats();
         // 总丢包率（音频丢包和视频丢包）
-        let loss = 0;
-        let rtt = 0;
+        const loss = 0;
+        const rtt = 0;
+        let bytesSent = 0;
+        let bytesReceived = 0;
         res.forEach((report: RTCInboundRtpStreamStats) => {
-          // @ts-ignore
-          const currentRoundTripTime = report?.currentRoundTripTime;
-          const packetsLost = report?.packetsLost;
-          const packetsReceived = report.packetsReceived;
-          if (currentRoundTripTime !== undefined) {
-            rtt = currentRoundTripTime * 1000;
-          }
-          if (report.type === 'inbound-rtp' && report.kind === 'audio') {
-            if (packetsReceived !== undefined && packetsLost !== undefined) {
-              if (packetsLost === 0 || packetsReceived === 0) {
-                loss += 0;
-              } else {
-                loss += packetsLost / packetsReceived;
-              }
-            }
+          if (report.type === 'outbound-rtp' && report.kind === 'video') {
+            this.outboundFps = report.framesPerSecond || 0;
           }
           if (report.type === 'inbound-rtp' && report.kind === 'video') {
-            if (packetsReceived !== undefined && packetsLost !== undefined) {
-              if (packetsLost === 0 || packetsReceived === 0) {
-                loss += 0;
-              } else {
-                loss += packetsLost / packetsReceived;
-              }
-            }
+            this.inboundFps = report.framesPerSecond || 0;
           }
 
-          // if (report.type === 'outbound-rtp') {
-          //   // @ts-ignore
-          //   const bytesSent = report.bytesSent;
-          //   const timestamp = report.timestamp;
-          //   // 计算发送码率
-          //   const sendBitrate =
-          //     (bytesSent / (timestamp - previousTimestamp)) * 8;
-          //   console.log(`发送码率: ${sendBitrate} kbps`);
-          //   // 更新上一次获取码率信息的时间
-          //   previousTimestamp = timestamp;
-          // } else if (report.type === 'inbound-rtp') {
-          //   const bytesReceived = report.bytesReceived || 0;
-          //   const timestamp = report.timestamp;
-          //   // 计算接收码率
-          //   const receiveBitrate =
-          //     (bytesReceived / (timestamp - previousTimestamp)) * 8;
-          //   console.log(`接收码率: ${receiveBitrate} kbps`);
-          //   // 更新上一次获取码率信息的时间
-          //   previousTimestamp = timestamp;
-          // }
+          // @ts-ignore
+          if (report.bytesSent) {
+            // @ts-ignore
+            bytesSent += report.bytesSent || 0;
+          }
+          if (report.bytesReceived) {
+            // @ts-ignore
+            bytesReceived += report.bytesReceived || 0;
+          }
         });
+        this.bytesSent =
+          (bytesSent - this.preBytesSent) / 1024 / (this.getStatsDelay / 1000);
+        this.bytesReceived =
+          (bytesReceived - this.preBytesReceived) /
+          1024 /
+          (this.getStatsDelay / 1000);
+        this.preBytesSent = bytesSent;
+        this.preBytesReceived = bytesReceived;
         this.loss = loss;
         this.rtt = rtt;
 
@@ -159,7 +150,7 @@ export class WebRTCClass {
         console.error('getStats错误');
         console.log(error);
       }
-    }, 1000);
+    }, this.getStatsDelay);
   };
 
   prettierLog = (data: {
@@ -308,14 +299,13 @@ export class WebRTCClass {
       stream.onremovetrack = () => {
         this.prettierLog({ msg: 'onremovetrack事件', type: 'warn' });
       };
-      this.localStream = stream;
+      this.localStream = event.streams[0];
       this.videoEl.srcObject = event.streams[0];
     });
   };
 
   handleConnectionEvent = () => {
     if (!this.peerConnection) return;
-    const appStore = useAppStore();
 
     this.prettierLog({ msg: '开始监听pc的icecandidate事件', type: 'warn' });
     this.peerConnection.addEventListener('icecandidate', (event) => {
@@ -347,23 +337,18 @@ export class WebRTCClass {
       'iceconnectionstatechange',
       (event: any) => {
         this.prettierLog({
-          msg: 'pc收到iceconnectionstatechange:connected',
+          msg: 'pc收到iceconnectionstatechange',
           type: 'warn',
         });
         // https://developer.mozilla.org/zh-CN/docs/Web/API/RTCPeerConnection/connectionState
         const iceConnectionState = event.currentTarget.iceConnectionState;
+        console.log('iceconnectionstatechange', iceConnectionState);
         if (iceConnectionState === 'connected') {
           // ICE 代理至少对每个候选发现了一个可用的连接，此时仍然会继续测试远程候选以便发现更优的连接。同时可能在继续收集候选。
           this.prettierLog({
             msg: 'iceConnectionState:connected',
             type: 'warn',
           });
-          this.prettierLog({
-            msg: 'webrtc连接成功！',
-            type: 'success',
-          });
-          appStore.remoteDesk.isRemoteing = true;
-          console.log('sender', this.sender, 'receiver', this.receiver);
           this.update();
         }
         if (iceConnectionState === 'completed') {
@@ -408,16 +393,23 @@ export class WebRTCClass {
       (event: any) => {
         const connectionState = event.currentTarget.connectionState;
         this.prettierLog({
-          msg: 'pc收到connectionstatechange:connected',
+          msg: 'pc收到connectionstatechange',
           type: 'warn',
         });
+        console.log('connectionstatechange', connectionState);
         if (connectionState === 'connected') {
           // 表示每一个 ICE 连接要么正在使用（connected 或 completed 状态），要么已被关闭（closed 状态）；并且，至少有一个连接处于 connected 或 completed 状态。
           this.prettierLog({
             msg: 'connectionState:connected',
             type: 'warn',
           });
-          appStore.setLiveLine(LiveLineEnum.rtc);
+          this.prettierLog({
+            msg: 'webrtc连接成功！',
+            type: 'success',
+          });
+          console.log('sender', this.sender, 'receiver', this.receiver);
+          this.sucessCb?.(this.localStream);
+          // appStore.liveLine = LiveLineEnum.rtc;
           if (this.maxBitrate !== -1) {
             this.setMaxBitrate(this.maxBitrate);
           }
@@ -567,10 +559,6 @@ export class WebRTCClass {
       this.peerConnection = null;
       this.dataChannel = null;
       this.videoEl.remove();
-      const appStore = useAppStore();
-      appStore.remoteDesk.isClose = true;
-      appStore.remoteDesk.isRemoteing = false;
-      appStore.remoteDesk.startRemoteDesk = false;
     } catch (error) {
       this.prettierLog({ msg: '手动关闭webrtc连接失败', type: 'error' });
       console.error(error);

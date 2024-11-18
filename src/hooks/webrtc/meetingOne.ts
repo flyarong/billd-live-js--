@@ -34,6 +34,7 @@ export const useWebRtcMeetingOne = () => {
       sender: string;
       receiver: string;
       videoEl: HTMLVideoElement;
+      sucessCb: (stream) => void;
     }) => {
       return new WebRTCClass({
         maxBitrate: currentMaxBitrate.value,
@@ -44,6 +45,7 @@ export const useWebRtcMeetingOne = () => {
         videoEl: data.videoEl,
         sender: data.sender,
         receiver: data.receiver,
+        sucessCb: data.sucessCb,
       });
     },
     /**
@@ -93,6 +95,7 @@ export const useWebRtcMeetingOne = () => {
         }
       } catch (error) {
         console.error('meetingOne的sendOffer错误');
+        console.log(error);
       }
     },
     /**

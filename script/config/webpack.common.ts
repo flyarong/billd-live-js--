@@ -8,6 +8,7 @@ import MiniCssExtractPlugin from 'mini-css-extract-plugin';
 import { NaiveUiResolver } from 'unplugin-vue-components/resolvers';
 import ComponentsPlugin from 'unplugin-vue-components/webpack';
 import { VueLoaderPlugin } from 'vue-loader';
+// eslint-disable-next-line import/named
 import { Configuration, DefinePlugin } from 'webpack';
 import { BundleAnalyzerPlugin } from 'webpack-bundle-analyzer';
 import { merge } from 'webpack-merge';
@@ -209,7 +210,7 @@ const commonConfig = (isProduction) => {
         },
         {
           test: /\.css$/,
-          exclude: /node_modules/,
+          // exclude: /node_modules/,
           oneOf: [
             {
               resourceQuery: /module/,
@@ -231,7 +232,7 @@ const commonConfig = (isProduction) => {
         },
         {
           test: /\.(sass|scss)$/,
-          exclude: /node_modules/,
+          // exclude: /node_modules/,
           oneOf: [
             {
               resourceQuery: /module/,

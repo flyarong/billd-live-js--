@@ -18,7 +18,6 @@
       </div>
       <div class="footer">
         <slot name="footer"></slot>
-
         <div
           v-if="!slots.footer"
           class="btn"
@@ -36,8 +35,8 @@ import { useSlots } from 'vue';
 const slots = useSlots();
 const props = withDefaults(
   defineProps<{
-    hiddenClose?: Boolean;
-    maskClosable?: Boolean;
+    hiddenClose?: boolean;
+    maskClosable?: boolean;
     title?: string;
     width?: string;
   }>(),

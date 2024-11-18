@@ -27,7 +27,7 @@
         :key="index"
       >
         <div class="name">{{ item.name }}</div>
-        <div class="desc">{{ item.desc }}</div>
+        <div class="desc">{{ item.short_desc }}</div>
         <div class="price">
           <span class="t1">{{ item.price.left }}</span>
           <span class="t2">{{ item.price.center }}</span>
@@ -78,7 +78,8 @@
           alt=""
           style="width: 300px"
         />
-        <div>qq：2274751790</div>
+        <div>微信号: {{ AUTHOR_INFO.wechat }}</div>
+        <div>qq：{{ AUTHOR_INFO.qq }}</div>
         <p>添加时请备注：私有化部署+用途</p>
       </div>
     </n-card>
@@ -90,7 +91,7 @@ import { openToTarget } from 'billd-utils';
 import { ref } from 'vue';
 import { useRouter } from 'vue-router';
 
-import { COMMON_URL } from '@/constant';
+import { AUTHOR_INFO, COMMON_URL, PROJECT_NAME } from '@/constant';
 import { routerName } from '@/router';
 
 const router = useRouter();
@@ -265,7 +266,7 @@ const detail = ref({
         desc: '适用于个人/企业自建直播平台',
         price: {
           left: '￥',
-          center: '3999',
+          center: 'XXXX',
           right: '起',
         },
         tip: '涵盖Github全部/部分功能',
@@ -317,7 +318,7 @@ const detail = ref({
         },
       },
       {
-        color: 'blue',
+        color: 'green',
         name: '付费课程',
         desc: '适用于前端/音视频小白',
         price: {
@@ -345,7 +346,7 @@ const detail = ref({
           },
           {
             status: 'done',
-            txt: 'billd-live付费课微信群',
+            txt: `${PROJECT_NAME}付费课微信群`,
           },
         ],
         btn: {
@@ -360,7 +361,7 @@ const detail = ref({
         desc: '适用于个人/企业自建直播平台',
         price: {
           left: '￥',
-          center: '4999',
+          center: 'XXXX',
           right: '起',
         },
         tip: '',
@@ -393,7 +394,6 @@ const detail = ref({
 });
 
 function handleClick(item) {
-  console.log(item);
   if (item.type === 'link') {
     openToTarget(item.link);
   } else if (item.type === 'push') {

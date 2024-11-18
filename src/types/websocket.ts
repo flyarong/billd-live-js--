@@ -1,8 +1,4 @@
-import {
-  DanmuMsgTypeEnum,
-  ILiveUser,
-  WsMessageMsgIsFileEnum,
-} from '@/interface';
+import { ILiveUser, IWsMessage } from '@/interface';
 import { ILiveRoom, LiveRoomTypeEnum } from '@/types/ILiveRoom';
 import { IUser } from '@/types/IUser';
 
@@ -48,8 +44,6 @@ export enum WsMsgTypeEnum {
   getLiveUser = 'getLiveUser',
   /** 更新加入信息 */
   updateJoinInfo = 'updateJoinInfo',
-  /** 更新直播间预览图 */
-  updateLiveRoomCoverImg = 'updateLiveRoomCoverImg',
   /** 心跳 */
   heartbeat = 'heartbeat',
   /** 开始直播 */
@@ -67,13 +61,6 @@ export enum WsMsgTypeEnum {
   srsAnswer = 'srsAnswer',
   srsCandidate = 'srsCandidate',
 
-  startRemoteDesk = 'startRemoteDesk',
-  remoteDeskBehavior = 'remoteDeskBehavior',
-
-  remoteDeskOffer = 'remoteDeskOffer',
-  remoteDeskAnswer = 'remoteDeskAnswer',
-  remoteDeskCandidate = 'remoteDeskCandidate',
-
   nativeWebRtcOffer = 'nativeWebRtcOffer',
   nativeWebRtcAnswer = 'nativeWebRtcAnswer',
   nativeWebRtcCandidate = 'nativeWebRtcCandidate',
@@ -82,17 +69,39 @@ export enum WsMsgTypeEnum {
   batchSendOffer = 'batchSendOffer',
 }
 
+/** 发送消息统一格式 */
+export interface IReqWsFormat<T> {
+  /** 消息id */
+  request_id: string;
+  /** 用户socket_id */
+  socket_id: string;
+  /** 不需要手动传用户代理，从请求头拿 */
+  // user_agent: string;
+  /** 用户token */
+  user_token?: string;
+  /** 消息时间戳 */
+  time: number;
+  data: T;
+}
+
+/** 接收消息统一格式 */
+export interface IResWsFormat<T> {
+  /** 消息id */
+  request_id: string;
+  /** 消息时间戳 */
+  time: number;
+  data: T;
+}
+
 export interface IWsFormat<T> {
   /** 消息id */
   request_id: string;
   /** 用户socket_id */
   socket_id: string;
-  /** 用户信息 */
-  user_info?: IUser;
-  /** 用户id */
-  user_id?: number;
   /** 用户token */
   user_token?: string;
+  /** 消息时间戳 */
+  time: number;
   data: T;
 }
 
@@ -125,9 +134,7 @@ export type WsRoomLivingType = IWsFormat<{
 }>;
 
 /** 直播间没在直播 */
-export type WsRoomNoLiveType = IWsFormat<{
-  live_room: ILiveRoom;
-}>;
+export type WsRoomNoLiveType = IResWsFormat<{ live_room_id: number }>;
 
 export enum RemoteDeskBehaviorEnum {
   move,
@@ -158,25 +165,8 @@ export type WsRemoteDeskBehaviorType = IWsFormat<{
   keyboardtype: string | number;
 }>;
 
-export interface IDanmu {
-  msgType: DanmuMsgTypeEnum;
-  msgIsFile: WsMessageMsgIsFileEnum;
-  msg: string;
-  username?: string;
-  user_agent?: string;
-  send_msg_time: number;
-  live_room_id: number;
-  redbag_send_id?: number;
-  msg_id?: number;
-  isBilibili?: boolean;
-
-  socket_id: string;
-  request_id?: string;
-  userInfo?: IUser;
-}
-
 /** ws消息 */
-export type WsMessageType = IWsFormat<IDanmu>;
+export type WsMessageType = IWsFormat<IWsMessage>;
 
 /** 禁言用户 */
 export type WsDisableSpeakingType = IWsFormat<{
@@ -205,8 +195,7 @@ export type WsDisableSpeakingType = IWsFormat<{
 
 /** 其他用户加入直播间 */
 export type WsOtherJoinType = IWsFormat<{
-  live_room: ILiveRoom;
-  live_room_user_info: IUser;
+  live_room_id: number;
   join_user_info?: IUser;
   join_socket_id: string;
   socket_list: string[];
@@ -222,19 +211,11 @@ export type WsStartLiveType = IWsFormat<{
   msrMaxDelay: number;
 }>;
 
-/** 更新直播间预览图 */
-export type WsUpdateLiveRoomCoverImg = IWsFormat<{
-  cover_img: string;
-}>;
-
 /** 用户加入直播间 */
 export type WsJoinType = IWsFormat<{
-  socket_id: string;
   live_room_id: number;
   live_room?: ILiveRoom;
   anchor_info?: IUser;
-  user_info?: IUser;
-  isRemoteDesk?: boolean;
   isBilibili?: boolean;
   socket_list?: string[];
 }>;
@@ -247,9 +228,7 @@ export type WsLeavedType = IWsFormat<{
 
 /** 心跳检测 */
 export type WsHeartbeatType = IWsFormat<{
-  socket_id: string;
   live_room_id: number;
-  roomLiving?: boolean;
 }>;
 
 /** msr直播发送blob */
@@ -280,7 +259,6 @@ export type WsOfferType = IWsFormat<{
   sender: string;
   receiver: string;
   live_room_id: number;
-  isRemoteDesk?: boolean;
 }>;
 
 export type WsAnswerType = IWsFormat<{

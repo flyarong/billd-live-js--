@@ -1,8 +1,7 @@
-import { getRandomString } from 'billd-utils';
 import { ref } from 'vue';
 
 import { fetchRtcV1Publish } from '@/api/srs';
-import { SRS_CB_URL_PARAMS } from '@/constant';
+import { SRS_CB_URL_QUERY } from '@/constant';
 import { useRTCParams } from '@/hooks/use-rtcParams';
 import { useNetworkStore } from '@/store/network';
 import { useUserStore } from '@/store/user';
@@ -87,15 +86,12 @@ export const useForwardAll = () => {
             return;
           }
           const answerRes = await fetchRtcV1Publish({
-            api: `/rtc/v1/publish/`,
-            clientip: null,
             sdp: offerSdp.sdp!,
             streamurl: `${myLiveRoom.rtmp_url!}?${
-              SRS_CB_URL_PARAMS.publishKey
-            }=${myLiveRoom.key!}&${SRS_CB_URL_PARAMS.publishType}=${
+              SRS_CB_URL_QUERY.publishKey
+            }=${myLiveRoom.key!}&${SRS_CB_URL_QUERY.publishType}=${
               isPk.value ? LiveRoomTypeEnum.pk : LiveRoomTypeEnum.forward_all
             }`,
-            tid: getRandomString(10),
           });
           if (answerRes.data.code !== 0) {
             console.error('/rtc/v1/publish/拿不到sdp');
@@ -113,6 +109,7 @@ export const useForwardAll = () => {
         }
       } catch (error) {
         console.error('ForwardAll的sendOffer错误');
+        console.log(error);
       }
     },
   };

@@ -12,13 +12,11 @@
         :border="!userInfo?.avatar?.length"
       ></Avatar>
     </div>
-    <div class="username">用户昵称：{{ userInfo?.username }}</div>
-    <div
-      class="username"
-      v-if="userStore.userInfo"
-    >
+    <div>用户昵称：{{ userInfo?.username }}</div>
+    <div>
       用户角色：{{ userInfo?.roles?.map((item) => item.role_name).join(',') }}
     </div>
+    <div>注册时间：{{ userInfo?.created_at }}</div>
     <br />
     <div class="pull-url">
       <span
@@ -54,6 +52,7 @@
             userInfo.live_rooms[0]?.areas?.[0]?.name || '暂无分区'
           }}
         </div>
+        <div>开通时间：{{ userInfo?.live_rooms?.[0]?.created_at }}</div>
       </div>
     </div>
   </div>
@@ -65,6 +64,7 @@ import { ref, watchEffect } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
 import { fetchFindUser } from '@/api/user';
+import { URL_QUERY } from '@/constant';
 import { loginTip } from '@/hooks/use-login';
 import { routerName } from '@/router';
 import { useUserStore } from '@/store/user';
@@ -107,7 +107,7 @@ function openLiveRoom() {
   }
   const url = router.resolve({
     name: routerName.push,
-    query: { liveType: LiveRoomTypeEnum.srs },
+    query: { [URL_QUERY.liveType]: LiveRoomTypeEnum.srs },
   });
   openToTarget(url.href);
 }

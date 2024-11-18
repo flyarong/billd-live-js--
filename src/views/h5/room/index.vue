@@ -81,79 +81,60 @@
                 :key="index"
                 class="item"
               >
-                <template v-if="item.msgType === DanmuMsgTypeEnum.danmu">
+                <template v-if="item.msg_type === DanmuMsgTypeEnum.danmu">
                   <span class="time">
-                    [{{ formatTimeHour(item.send_msg_time) }}]
+                    [{{ formatTimeHour(item.send_msg_time!) }}]
                   </span>
                   <span class="name">
-                    <span v-if="item.userInfo">
-                      <span>{{ item.userInfo.username }}</span>
-                      <span>
-                        [{{
-                          item.userInfo.roles?.map((v) => v.role_name).join()
-                        }}]
-                      </span>
+                    <span>{{ item.username }}</span>
+                    <span>
+                      [{{ item.user?.roles?.map((v) => v.role_name).join() }}]
                     </span>
-                    <span v-else>
-                      <span>{{ item.socket_id }}</span>
-                      <span>[游客]</span>
-                    </span>
-                    <span>：</span>
                   </span>
+                  <span>：</span>
                   <span
                     class="msg"
-                    v-if="item.msgIsFile === WsMessageMsgIsFileEnum.no"
+                    v-if="item.content_type === WsMessageContentTypeEnum.txt"
                   >
-                    {{ item.msg }}
+                    {{ item.content }}
                   </span>
                   <div
                     class="msg img"
                     v-else
                   >
                     <img
-                      v-lazy="item.msg"
+                      v-lazy="item.content"
                       alt=""
                       @load="handleScrollTop"
                     />
                   </div>
                 </template>
                 <template
-                  v-else-if="item.msgType === DanmuMsgTypeEnum.otherJoin"
+                  v-else-if="item.msg_type === DanmuMsgTypeEnum.otherJoin"
                 >
                   <span class="name system">系统通知：</span>
-                  <span class="msg">
-                    {{ item.userInfo?.username || item.socket_id }}进入直播！
-                  </span>
+                  <span class="msg">{{ item.username }}进入直播！</span>
                 </template>
                 <template
-                  v-else-if="item.msgType === DanmuMsgTypeEnum.userLeaved"
+                  v-else-if="item.msg_type === DanmuMsgTypeEnum.userLeaved"
                 >
                   <span class="name system">系统通知：</span>
-                  <span class="msg">
-                    {{ item.userInfo?.username || item.socket_id }}离开直播！
-                  </span>
+                  <span class="msg">{{ item.username }}离开直播！</span>
                 </template>
-                <template v-else-if="item.msgType === DanmuMsgTypeEnum.reward">
-                  <span class="time">
-                    [{{ formatTimeHour(item.send_msg_time) }}]
-                  </span>
-                  <span class="name">
-                    <span v-if="item.userInfo">
-                      <span>{{ item.userInfo.username }}</span>
-                      <span>
-                        [{{
-                          item.userInfo.roles?.map((v) => v.role_name).join()
-                        }}]
-                      </span>
-                    </span>
-                    <span v-else>
-                      <span>{{ item.socket_id }}</span>
-                      <span>[游客]</span>
+                <div
+                  class="reward"
+                  v-else-if="item.msg_type === DanmuMsgTypeEnum.reward"
+                >
+                  <span> [{{ formatTimeHour(item.send_msg_time!) }}] </span>
+                  <span>
+                    <span>{{ item.username }}</span>
+                    <span>
+                      [{{ item.user?.roles?.map((v) => v.role_name).join() }}]
                     </span>
                     <span>：</span>
                   </span>
-                  <span class="msg"> 打赏了：{{ item.msg }} </span>
-                </template>
+                  <span>打赏了{{ item.content }}！</span>
+                </div>
               </div>
             </div>
           </div>
@@ -287,7 +268,7 @@
         type="info"
         size="small"
         :color="THEME_COLOR"
-        @click="sendDanmu"
+        @click="handleSendDanmu"
       >
         发送
       </n-button>
@@ -308,21 +289,23 @@ import { THEME_COLOR } from '@/constant';
 import { emojiArray } from '@/emoji';
 import { useFullScreen, usePictureInPicture } from '@/hooks/use-play';
 import { usePull } from '@/hooks/use-pull';
+import { useWebsocket } from '@/hooks/use-websocket';
 import {
   DanmuMsgTypeEnum,
-  WsMessageMsgIsFileEnum,
-  WsMessageMsgIsShowEnum,
-  WsMessageMsgIsVerifyEnum,
+  WsMessageContentTypeEnum,
+  WsMessageIsShowEnum,
+  WsMessageIsVerifyEnum,
 } from '@/interface';
 import router, { mobileRouterName } from '@/router';
 import { useAppStore } from '@/store/app';
-import { usePiniaCacheStore } from '@/store/cache';
+import { useCacheStore } from '@/store/cache';
 import { useUserStore } from '@/store/user';
 import { LiveRoomTypeEnum } from '@/types/ILiveRoom';
+import { IUser } from '@/types/IUser';
 import { formatTimeHour } from '@/utils';
 
 const route = useRoute();
-const cacheStore = usePiniaCacheStore();
+const cacheStore = useCacheStore();
 const appStore = useAppStore();
 const userStore = useUserStore();
 
@@ -330,6 +313,7 @@ const bottomRef = ref<HTMLDivElement>();
 const danmuListRef = ref<HTMLDivElement>();
 const showEmoji = ref(false);
 
+const anchorInfo = ref<IUser>();
 const containerHeight = ref(0);
 const videoWrapHeight = ref(0);
 const remoteVideoRef = ref<HTMLDivElement>();
@@ -340,8 +324,8 @@ const {
   videoWrapRef,
   handlePlay,
   initPull,
+  initWs,
   keydownDanmu,
-  sendDanmu,
   closeRtc,
   closeWs,
   liveUserList,
@@ -351,9 +335,10 @@ const {
   damuList,
   danmuStr,
   roomLiving,
-  anchorInfo,
   videoResolution,
-} = usePull(roomId.value);
+} = usePull();
+
+const { sendDanmuTxt } = useWebsocket();
 
 onUnmounted(() => {
   closeWs();
@@ -363,6 +348,10 @@ onUnmounted(() => {
 });
 
 onMounted(() => {
+  if (!Number(roomId.value)) {
+    return;
+  }
+  initPull({ roomId: roomId.value, autolay: true });
   showPlayBtn.value = true;
   videoWrapRef.value = remoteVideoRef.value;
   setTimeout(() => {
@@ -383,6 +372,11 @@ onMounted(() => {
   handleHistoryMsg();
 });
 
+function handleSendDanmu() {
+  sendDanmuTxt(danmuStr.value);
+  danmuStr.value = '';
+}
+
 function handleLogout() {
   userStore.logout();
   setTimeout(() => {
@@ -398,36 +392,24 @@ async function handleHistoryMsg() {
       orderName: 'created_at',
       orderBy: 'desc',
       live_room_id: Number(roomId.value),
-      is_show: WsMessageMsgIsShowEnum.yes,
-      is_verify: WsMessageMsgIsVerifyEnum.yes,
+      is_show: WsMessageIsShowEnum.yes,
+      is_verify: WsMessageIsVerifyEnum.yes,
     });
     if (res.code === 200) {
       res.data.rows.forEach((v) => {
-        damuList.value.unshift({
-          ...v,
-          live_room_id: v.live_room_id!,
-          msg_id: v.id!,
-          socket_id: '',
-          msgType: v.msg_type!,
-          msgIsFile: v.msg_is_file!,
-          userInfo: v.user,
-          msg: v.content!,
-          username: v.username!,
-          send_msg_time: Number(v.send_msg_time),
-          redbag_send_id: v.redbag_send_id,
-        });
+        damuList.value.unshift(v);
       });
       if (
         appStore.liveRoomInfo?.system_msg &&
         appStore.liveRoomInfo?.system_msg !== ''
       ) {
         damuList.value.push({
+          send_msg_time: +new Date(),
           live_room_id: Number(roomId.value),
-          socket_id: '',
-          msgType: DanmuMsgTypeEnum.system,
-          msgIsFile: WsMessageMsgIsFileEnum.no,
-          msg: appStore.liveRoomInfo.system_msg,
-          send_msg_time: Number(+new Date()),
+          id: -1,
+          content: appStore.liveRoomInfo?.system_msg,
+          content_type: WsMessageContentTypeEnum.txt,
+          msg_type: DanmuMsgTypeEnum.system,
         });
       }
     }
@@ -496,16 +478,24 @@ function handleFullScreen() {
 async function getLiveRoomInfo() {
   try {
     videoLoading.value = true;
-    const res = await fetchFindLiveRoom(roomId.value);
+    const res = await fetchFindLiveRoom(Number(roomId.value));
     if (res.code === 200) {
-      appStore.setLiveRoomInfo(res.data);
-      if (res.data.type === LiveRoomTypeEnum.wertc_live) {
-        autoplayVal.value = true;
-        showPlayBtn.value = false;
-      } else {
-        showPlayBtn.value = true;
+      if (res.data) {
+        appStore.liveRoomInfo = res.data;
+        anchorInfo.value = res.data.user_live_room?.user;
+        if (res.data.live) {
+          roomLiving.value = true;
+        } else {
+          videoLoading.value = false;
+        }
+        if (res.data?.type === LiveRoomTypeEnum.wertc_live) {
+          autoplayVal.value = true;
+          showPlayBtn.value = false;
+        } else {
+          showPlayBtn.value = true;
+        }
+        initWs({ roomId: roomId.value, isAnchor: false });
       }
-      initPull({ autolay: autoplayVal.value });
     }
   } catch (error) {
     console.error(error);
@@ -547,10 +537,6 @@ function startPull() {
       }
       .username {
         margin-left: 10px;
-      }
-    }
-    .right {
-      .btn {
       }
     }
   }
@@ -700,6 +686,11 @@ function startPull() {
       word-wrap: break-word;
       font-size: 13px;
 
+      .reward {
+        color: $theme-color-gold;
+        font-weight: bold;
+      }
+
       .name,
       .time {
         color: white;
@@ -818,7 +809,7 @@ function startPull() {
       outline: none;
       border: 1px solid hsla(0, 0%, 60%, 0.2);
       border-radius: 4px;
-      background-color: #f1f2f3;
+      background-color: #f5f6f7;
       font-size: 14px;
     }
   }

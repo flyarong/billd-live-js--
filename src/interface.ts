@@ -154,17 +154,28 @@ export interface IQiniuData {
   qiniu_md5?: string;
 }
 
-export enum WsMessageMsgIsFileEnum {
+export enum WsMessageIsFileEnum {
   yes,
   no,
 }
 
-export enum WsMessageMsgIsShowEnum {
+export enum WsMessageContentTypeEnum {
+  txt,
+  img,
+  video,
+}
+
+export enum WsMessageIsShowEnum {
   yes,
   no,
 }
 
-export enum WsMessageMsgIsVerifyEnum {
+export enum WsMessageIsVerifyEnum {
+  yes,
+  no,
+}
+
+export enum WsMessageIsBilibiliEnum {
   yes,
   no,
 }
@@ -173,18 +184,20 @@ export interface IWsMessage {
   id?: number;
   username?: string;
   origin_username?: string;
+  content_type?: WsMessageContentTypeEnum;
   content?: string;
   origin_content?: string;
   redbag_send_id?: number;
   live_room_id?: number;
   user_id?: number;
   ip?: string;
-  msg_is_file?: WsMessageMsgIsFileEnum;
   msg_type?: DanmuMsgTypeEnum;
   user_agent?: string;
   send_msg_time?: number;
-  is_show?: WsMessageMsgIsShowEnum;
-  is_verify?: WsMessageMsgIsVerifyEnum;
+  is_show?: WsMessageIsShowEnum;
+  is_verify?: WsMessageIsVerifyEnum;
+  is_bilibili?: WsMessageIsBilibiliEnum;
+  remark?: string;
 
   user?: IUser;
   redbag_send?: IRedbagSend;
@@ -270,6 +283,48 @@ export interface IGiftRecord {
   deleted_at?: string;
 }
 
+export enum LoginRecordEnum {
+  registerUsername,
+  registerId,
+  registerQq,
+  loginUsername,
+  loginId,
+  loginQq,
+}
+
+export interface ILoginRecord {
+  id?: number;
+  user_id?: number;
+  user_agent?: string;
+  type?: LoginRecordEnum;
+  ip?: string;
+  remark?: string;
+
+  user?: IUser;
+
+  created_at?: string;
+  updated_at?: string;
+  deleted_at?: string;
+}
+
+export enum GlobalMsgTypeEnum {
+  system,
+}
+
+export interface IGlobalMsg {
+  id?: number;
+  user_id?: number;
+  type?: GlobalMsgTypeEnum;
+  content?: string;
+  remark?: string;
+
+  user?: IUser;
+
+  created_at?: string;
+  updated_at?: string;
+  deleted_at?: string;
+}
+
 export interface ISigninStatistics {
   id?: number;
   user_id?: number;
@@ -311,6 +366,7 @@ export interface ISigninRecord {
 }
 
 export enum LiveLineEnum {
+  'rtmp-rtc' = 'rtmp-rtc',
   rtc = 'rtc',
   hls = 'hls',
   flv = 'flv',
@@ -385,16 +441,23 @@ export interface IWallet {
   deleted_at?: string;
 }
 
-export type IList<T> = {
-  nowPage?: number;
-  pageSize?: number;
+export type IListBase = {
+  nowPage?: number | string;
+  pageSize?: number | string;
   orderBy?: string;
   orderName?: string;
   keyWord?: string;
+  childNowPage?: number | string;
+  childPageSize?: number | string;
+  childOrderBy?: string;
+  childOrderName?: string;
+  childKeyWord?: string;
   rangTimeType?: 'created_at' | 'updated_at' | 'deleted_at';
-  rangTimeStart?: string;
-  rangTimeEnd?: string;
-} & T;
+  rangTimeStart?: number | string;
+  rangTimeEnd?: number | string;
+};
+
+export type IList<T> = IListBase & T;
 
 export interface IPaging<T> {
   nowPage: number;
@@ -506,6 +569,7 @@ export enum GoodsTypeEnum {
   sponsors = 'sponsors',
   gift = 'gift',
   recharge = 'recharge',
+  qypShop = 'qypShop',
 }
 
 export interface ISettings {
@@ -529,9 +593,12 @@ export interface IGoods {
   price?: number;
   original_price?: number;
   nums?: number;
+  pay_nums?: number;
+  inventory?: number;
   badge?: string;
   badge_bg?: string;
   remark?: string;
+
   created_at?: string;
   updated_at?: string;
   deleted_at?: string;
@@ -601,8 +668,9 @@ export interface IArea {
   /** 备注 */
   remark?: string;
   /** 权重 */
-  weight?: number;
+  priority?: number;
   area_live_rooms?: IAreaLiveRoom[];
+  live_rooms?: ILiveRoom[];
   live_room_is_show?: LiveRoomIsShowEnum;
   live_room_status?: LiveRoomStatusEnum;
   created_at?: string;
@@ -639,18 +707,11 @@ export interface ISrsPublishStream {
   srs_stream_id?: string;
 }
 
-export interface ILive extends ISrsPublishStream {
+export type ILive = {
   id?: number;
-  /** 用户信息 */
-  user?: IUser;
-  /** 直播间信息 */
-  live_room?: ILiveRoom;
 
   socket_id?: string;
-  user_id?: number;
   live_room_id?: number;
-  live_room_is_show?: LiveRoomIsShowEnum;
-  live_room_status?: LiveRoomStatusEnum;
   /** 1开启;2关闭 */
   track_video?: number;
   /** 1开启;2关闭 */
@@ -659,7 +720,10 @@ export interface ILive extends ISrsPublishStream {
   created_at?: string;
   updated_at?: string;
   deleted_at?: string;
-}
+} & ISrsPublishStream & {
+    /** 直播间信息 */
+    live_room?: ILiveRoom;
+  };
 
 export enum MediaTypeEnum {
   camera,
@@ -694,4 +758,16 @@ export interface ILiveUser {
     joinRoomId: number;
     userInfo?: IUser;
   };
+}
+
+export interface ICredential {
+  expiredTime: number;
+  expiration: string;
+  credentials: {
+    sessionToken: string;
+    tmpSecretId: string;
+    tmpSecretKey: string;
+  };
+  requestId: string;
+  startTime: number;
 }

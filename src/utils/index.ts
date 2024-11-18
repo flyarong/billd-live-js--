@@ -1,16 +1,24 @@
 // TIP: ctrl+cmd+t,生成函数注释
-import { computeBox, getRangeRandom } from 'billd-utils';
+import { computeBox, getRangeRandom, judgeType } from 'billd-utils';
 import sparkMD5 from 'spark-md5';
 
-export const googleAd = () => {
-  const el = document.createElement('script');
-  el.src =
-    'https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6064454674933772';
-  const head = document.getElementsByTagName('head')[0];
-  el.async = true;
-  el.crossOrigin = 'anonymous';
-  head.appendChild(el);
-};
+/**
+ * ios日期兼容
+ * 2022-01-19 15:28:00 转成 2022/01/19 15:28:00
+ */
+export function iosTimestamp(time: string) {
+  return time.replace(/-/g, '/');
+}
+
+export function handleStrEllipsis(str: string, maxlen: number) {
+  const res = str || '';
+  const len = maxlen || 3;
+  if (res?.length > len) {
+    return `${res.slice(0, len)}...`;
+  } else {
+    return res;
+  }
+}
 
 /**
  * music，该曲目应被视为包含音乐。设置该值时 MediaStreamTrack.kind的值必须为"audio"。
@@ -104,18 +112,40 @@ export async function handleUserMedia({ video, audio }) {
   }
 }
 
-export function formatMoney(money?: number) {
-  if (!money) {
-    return '0.00';
+export function formatPayNum(num: number) {
+  if (num > 10000) {
+    return `${Math.floor(num / 10000)}万+`;
+  } else if (num > 1000) {
+    return `${Math.floor(num / 1000) * 1000}+`;
+  } else if (num > 100) {
+    return `${Math.floor(num / 100) * 100}+`;
+  } else {
+    return num;
   }
-  return (money / 100).toFixed(2);
 }
 
-export const formatTimeHour = (timestamp: number) => {
+export function formatMoney(money: number, hideZeroCent?: boolean) {
+  if (!money) {
+    return hideZeroCent ? '0' : '0.00';
+  }
+  const res = (money / 100).toFixed(2);
+  const res1 = res.split('.');
+  if (hideZeroCent && res1[1] === '00') {
+    return res1[0];
+  } else {
+    return res;
+  }
+}
+
+export const formatTimeHour = (time: number | string | Date) => {
   function addZero(num: number) {
     return num < 10 ? `0${num}` : num;
   }
-  const date = new Date(timestamp);
+  let time2 = time;
+  if (judgeType(time) === 'string') {
+    time2 = iosTimestamp(time as string);
+  }
+  const date = new Date(time2);
 
   // 获取小时
   const hours = date.getHours();
@@ -584,6 +614,9 @@ export function videoToCanvas(data: {
     throw new Error('videoEl不能为空！');
   }
   const canvas = document.createElement('canvas');
+  canvas.oncontextmenu = (e) => {
+    e.preventDefault();
+  };
   const ctx = canvas.getContext('2d')!;
 
   let timer;

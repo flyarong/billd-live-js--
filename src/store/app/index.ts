@@ -1,17 +1,20 @@
 import { UploadFileInfo } from 'naive-ui';
 import { defineStore } from 'pinia';
 
-import { LiveLineEnum, LiveRenderEnum, MediaTypeEnum } from '@/interface';
+import {
+  IArea,
+  LiveLineEnum,
+  LiveRenderEnum,
+  MediaTypeEnum,
+} from '@/interface';
 import { mobileRouterName } from '@/router';
 import { ILiveRoom } from '@/types/ILiveRoom';
 
 export type AppRootState = {
-  remoteDesk: {
-    sender: string;
-    startRemoteDesk: boolean;
-    isRemoteing?: boolean;
-    isClose?: boolean;
-  };
+  pageIsClick: boolean;
+  useGoogleAd: boolean;
+  usePayCourse: boolean;
+  areaList: IArea[];
   playing: boolean;
   videoRatio: number;
   normalVolume: number;
@@ -72,12 +75,10 @@ export type AppRootState = {
 export const useAppStore = defineStore('app', {
   state: (): AppRootState => {
     return {
-      remoteDesk: {
-        startRemoteDesk: false,
-        sender: '',
-        isRemoteing: false,
-        isClose: undefined,
-      },
+      pageIsClick: false,
+      useGoogleAd: false,
+      usePayCourse: false,
+      areaList: [],
       playing: false,
       videoRatio: 16 / 9,
       videoControls: {
@@ -89,6 +90,7 @@ export const useAppStore = defineStore('app', {
       normalVolume: 80,
       navList: [
         { routeName: mobileRouterName.h5, name: '频道' },
+        { routeName: mobileRouterName.h5Shop, name: '商店' },
         { routeName: mobileRouterName.h5Rank, name: '排行' },
         { routeName: mobileRouterName.h5My, name: '我的' },
       ],
@@ -103,9 +105,6 @@ export const useAppStore = defineStore('app', {
   actions: {
     setLiveRoomInfo(res: AppRootState['liveRoomInfo']) {
       this.liveRoomInfo = res;
-    },
-    setLiveLine(res: AppRootState['liveLine']) {
-      this.liveLine = res;
     },
     setAllTrack(res: AppRootState['allTrack']) {
       this.allTrack = res;

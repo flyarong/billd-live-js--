@@ -8,10 +8,52 @@ import {
   fetchUploadMergeChunk,
   fetchUploadProgress,
 } from '@/api/qiniuData';
-import { QINIU_RESOURCE } from '@/constant';
+import { QINIU_KODO } from '@/spec-config';
 import { getHash, splitFile } from '@/utils';
 
 export async function useUpload({
+  prefix,
+  file,
+}: {
+  prefix: string;
+  file: File;
+}) {
+  const { hash, ext } = await getHash(file);
+  const res = await fetchQiniuUploadToken({ ext, hash, prefix });
+  if (res.code === 200) {
+    return new Promise<{ flag: boolean; err?: any; resultUrl?: string }>(
+      (resolve) => {
+        const key = `${prefix + hash}.${ext}`;
+        const observable = upload(file, key, res.data);
+        observable.subscribe({
+          next(res) {
+            console.log('next', res);
+          },
+          error(err) {
+            console.log('error', err);
+            resolve({
+              flag: false,
+              err,
+            });
+          },
+          complete(res) {
+            console.log('complete', res);
+            resolve({
+              flag: true,
+              resultUrl: `${QINIU_KODO.hssblog.url}/${res.key as string}`,
+            });
+          },
+        });
+      }
+    );
+  } else {
+    return Promise.resolve<{ flag: boolean; err?: any; resultUrl?: string }>({
+      flag: false,
+    });
+  }
+}
+
+export async function useUploadServer({
   prefix,
   file,
 }: {
@@ -115,47 +157,5 @@ export async function useUpload({
     console.error(error);
   } finally {
     clearInterval(timer.value);
-  }
-}
-
-export async function useQiniuJsUpload({
-  prefix,
-  file,
-}: {
-  prefix: string;
-  file: File;
-}) {
-  const { hash, ext } = await getHash(file);
-  const res = await fetchQiniuUploadToken({ ext, hash, prefix });
-  if (res.code === 200) {
-    return new Promise<{ flag: boolean; err?: any; resultUrl?: string }>(
-      (resolve) => {
-        const key = `${prefix + hash}.${ext}`;
-        const observable = upload(file, key, res.data);
-        observable.subscribe({
-          next(res) {
-            console.log('next', res);
-          },
-          error(err) {
-            console.log('error', err);
-            resolve({
-              flag: false,
-              err,
-            });
-          },
-          complete(res) {
-            console.log('complete', res);
-            resolve({
-              flag: true,
-              resultUrl: `${QINIU_RESOURCE.url}/${res.key as string}`,
-            });
-          },
-        });
-      }
-    );
-  } else {
-    return Promise.resolve<{ flag: boolean; err?: any; resultUrl?: string }>({
-      flag: false,
-    });
   }
 }

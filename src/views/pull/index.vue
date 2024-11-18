@@ -1,6 +1,13 @@
 <template>
   <div
     class="pull-wrap"
+    v-if="!appStore.liveRoomInfo"
+  >
+    暂无该直播间
+  </div>
+  <div
+    v-else
+    class="pull-wrap"
     :class="{ isPageFull: appStore.videoControlsValue.pageFullMode }"
   >
     <div class="bg-img-wrap">
@@ -44,16 +51,37 @@
                 <div class="f-left">+关注</div>
                 <div class="f-right">666</div>
               </div>
-              <div class="rtt">延迟：{{ rtcRtt || '-' }}</div>
-              <div class="loss">丢包：{{ rtcLoss || '-' }}</div>
-              <div class="bitrate">码率：-</div>
+              <span v-if="NODE_ENV === 'development'">
+                {{ liveRoomTypeEnumMap[appStore.liveRoomInfo?.type!] }}：{{
+                  mySocketId
+                }}
+              </span>
+              <div
+                class="rtc-info"
+                v-if="
+                  [
+                    LiveRoomTypeEnum.wertc_live,
+                    LiveRoomTypeEnum.wertc_meeting_one,
+                    LiveRoomTypeEnum.wertc_meeting_two,
+                  ].includes(appStore.liveRoomInfo?.type!)
+                "
+              >
+                <div class="item">延迟：{{ rtcRtt || '-' }}</div>
+                <div class="item">丢包：{{ rtcLoss || '-' }}</div>
+                <div class="item">帧率：{{ rtcFps || '-' }}</div>
+                <div class="item">发送码率：{{ rtcBytesSent || '-' }}</div>
+                <div class="item">接收码率：{{ rtcBytesReceived || '-' }}</div>
+              </div>
             </div>
             <div class="bottom">
               <div
                 class="desc"
-                :title="appStore.liveRoomInfo?.desc"
+                v-if="appStore.liveRoomInfo?.desc?.length"
               >
-                {{ appStore.liveRoomInfo?.desc }}
+                <FloatTip
+                  :txt="appStore.liveRoomInfo?.desc"
+                  :max-len="20"
+                ></FloatTip>
               </div>
               <span
                 class="area"
@@ -66,24 +94,11 @@
               >
                 {{ appStore.liveRoomInfo?.areas?.[0]?.name }}
               </span>
-
-              <span v-if="NODE_ENV === 'development'">
-                socketId:{{ mySocketId }}
-              </span>
             </div>
           </div>
         </div>
-        <div
-          class="other"
-          @click="handlePk"
-        >
+        <div class="other">
           <div class="top">
-            <div
-              class="item"
-              v-if="NODE_ENV === 'development'"
-            >
-              {{ liveRoomTypeEnumMap[appStore.liveRoomInfo?.type || ''] }}
-            </div>
             <div class="item">666人看过</div>
             <div class="item">666点赞</div>
             <div class="item">当前在线:{{ liveUserList.length }}人</div>
@@ -141,13 +156,16 @@
           class="remote-video"
           ref="remoteVideoRef"
         ></div>
-        <VideoControls
-          :resolution="videoResolution"
-          @refresh="handleRefresh"
-          @full-screen="handleFullScreen"
-          @picture-in-picture="hanldePictureInPicture"
-          :control="appStore.videoControls"
-        ></VideoControls>
+        <div class="video-controls">
+          <VideoControls
+            v-if="roomLiving"
+            :resolution="videoResolution"
+            @refresh="handleRefresh"
+            @full-screen="handleFullScreen"
+            @picture-in-picture="hanldePictureInPicture"
+            :control="appStore.videoControls"
+          ></VideoControls>
+        </div>
       </div>
 
       <div
@@ -176,7 +194,7 @@
             </div>
           </div>
           <div class="name">{{ item.name }}</div>
-          <div class="price">￥{{ formatMoney(item.price) }}</div>
+          <div class="price">￥{{ formatMoney(item.price!) }}</div>
         </div>
         <div
           class="item"
@@ -184,12 +202,15 @@
         >
           <div class="ico wallet"></div>
           <div class="name">
-            余额:{{ formatMoney(userStore.userInfo?.wallet?.balance) }}元
+            余额:{{ formatMoney(userStore.userInfo?.wallet?.balance!) }}元
           </div>
           <div class="price">立即充值</div>
         </div>
       </div>
-      <div class="ad-wrap-b">
+      <div
+        class="ad-wrap-b"
+        v-if="appStore.useGoogleAd"
+      >
         <!-- live-拉流页面广告位2 -->
         <ins
           class="adsbygoogle"
@@ -251,47 +272,32 @@
           :key="index"
           class="item"
         >
-          <template v-if="item.msgType === DanmuMsgTypeEnum.reward">
+          <template v-if="item.msg_type === DanmuMsgTypeEnum.reward">
             <div class="reward">
-              <span>[{{ formatTimeHour(item.send_msg_time) }}]</span>
-              <span>
-                {{ item.userInfo?.username }} 打赏了{{ item.msg }}！
-              </span>
+              <span>[{{ formatTimeHour(item.send_msg_time!) }}]</span>
+              <span> {{ item.user?.username }}打赏了{{ item.content }}！</span>
             </div>
           </template>
-          <template v-if="item.msgType === DanmuMsgTypeEnum.danmu">
-            <span class="time">[{{ formatTimeHour(item.send_msg_time) }}]</span>
+          <template v-if="item.msg_type === DanmuMsgTypeEnum.danmu">
+            <span class="time"
+              >[{{ formatTimeHour(item.send_msg_time!) }}]</span
+            >
             <span class="name">
-              <span
-                v-if="
-                  item.userInfo && userStore.userInfo?.id === item.userInfo.id
-                "
-              >
-                <span>{{ item.userInfo.username }}</span>
-                <span>
-                  [{{ item.userInfo.roles?.map((v) => v.role_name).join() }}]
-                </span>
-              </span>
               <Dropdown
-                trigger="click"
+                trigger="hover"
                 positon="left"
-                v-else-if="item.userInfo"
               >
                 <template #btn>
-                  <span>{{ item.userInfo.username }}</span>
-                  <span>
-                    [{{ item.userInfo.roles?.map((v) => v.role_name).join() }}]
-                  </span>
+                  <span>{{ item.username }}</span>
                 </template>
                 <template #list>
                   <div class="list">
-                    <div class="item">{{ item.userInfo.username }}</div>
+                    <div class="item">{{ item.username }}</div>
                     <div
                       class="item operator"
                       @click="
                         handleDisableSpeakingUser({
-                          userId: item.userInfo.id,
-                          socketId: item.socket_id,
+                          userId: item.user?.id,
                         })
                       "
                     >
@@ -301,8 +307,7 @@
                       class="item operator"
                       @click="
                         handleRestoreSpeakingUser({
-                          userId: item.userInfo.id,
-                          socketId: item.socket_id,
+                          userId: item.user?.id,
                         })
                       "
                     >
@@ -317,40 +322,35 @@
                   </div>
                 </template>
               </Dropdown>
-              <span v-else>
-                <span>{{ item.socket_id }}</span>
-                <span>[游客]</span>
+              <span>
+                [{{ item.user?.roles?.map((v) => v.role_name).join() }}]
               </span>
             </span>
             <span>：</span>
             <span
               class="msg"
-              v-if="item.msgIsFile === WsMessageMsgIsFileEnum.no"
+              v-if="item.content_type === WsMessageContentTypeEnum.txt"
             >
-              {{ item.msg }}
+              {{ item.content }}
             </span>
             <div
               class="msg img"
               v-else
             >
               <img
-                :src="item.msg"
+                :src="item.content"
                 alt=""
                 @load="handleScrollTop"
               />
             </div>
           </template>
-          <template v-else-if="item.msgType === DanmuMsgTypeEnum.otherJoin">
+          <template v-else-if="item.msg_type === DanmuMsgTypeEnum.otherJoin">
             <span class="name system">系统通知：</span>
-            <span class="msg">
-              {{ item.userInfo?.username || item.socket_id }}进入直播！
-            </span>
+            <span class="msg">{{ item.username }}进入直播！ </span>
           </template>
-          <template v-else-if="item.msgType === DanmuMsgTypeEnum.userLeaved">
+          <template v-else-if="item.msg_type === DanmuMsgTypeEnum.userLeaved">
             <span class="name system">系统通知：</span>
-            <span class="msg">
-              {{ item.userInfo?.username || item.socket_id }}离开直播！
-            </span>
+            <span class="msg">{{ item.username }}离开直播！ </span>
           </template>
         </div>
       </div>
@@ -360,13 +360,12 @@
       >
         <div
           class="disableSpeaking"
-          v-if="appStore.disableSpeaking.get(appStore.liveRoomInfo?.id || -1)"
+          v-if="appStore.disableSpeaking.get(appStore.liveRoomInfo?.id!)"
         >
           <div class="bg"></div>
           <span class="txt">
             你被禁言了（{{
-              appStore.disableSpeaking.get(appStore.liveRoomInfo?.id || -1)
-                ?.label
+              appStore.disableSpeaking.get(appStore.liveRoomInfo?.id!)
             }}）
           </span>
         </div>
@@ -419,7 +418,10 @@
       </div>
     </div>
 
-    <div class="ad-wrap-a">
+    <div
+      class="ad-wrap-a"
+      v-if="appStore.useGoogleAd"
+    >
       <!-- live-拉流页面广告位1 -->
       <ins
         class="adsbygoogle"
@@ -455,13 +457,15 @@ import {
 } from '@/api/giftRecord';
 import { fetchGoodsList } from '@/api/goods';
 import { fetchLiveRoomOnlineUser } from '@/api/live';
+import { fetchFindLiveRoom, fetchLiveRoomBilibili } from '@/api/liveRoom';
 import { fetchGetWsMessageList } from '@/api/wsMessage';
-import { QINIU_RESOURCE, liveRoomTypeEnumMap } from '@/constant';
+import { liveRoomTypeEnumMap, URL_QUERY } from '@/constant';
 import { emojiArray } from '@/emoji';
 import { commentAuthTip, loginTip } from '@/hooks/use-login';
 import { useFullScreen, usePictureInPicture } from '@/hooks/use-play';
 import { usePull } from '@/hooks/use-pull';
-import { useQiniuJsUpload } from '@/hooks/use-upload';
+import { useUpload } from '@/hooks/use-upload';
+import { useWebsocket } from '@/hooks/use-websocket';
 import {
   DanmuMsgTypeEnum,
   GiftRecordStatusEnum,
@@ -470,18 +474,20 @@ import {
   IGoods,
   LiveLineEnum,
   LiveRenderEnum,
-  WsMessageMsgIsFileEnum,
-  WsMessageMsgIsShowEnum,
-  WsMessageMsgIsVerifyEnum,
+  WsMessageContentTypeEnum,
+  WsMessageIsFileEnum,
+  WsMessageIsShowEnum,
+  WsMessageIsVerifyEnum,
 } from '@/interface';
 import router, { routerName } from '@/router';
+import { QINIU_KODO } from '@/spec-config';
 import { useAppStore } from '@/store/app';
 import { useNetworkStore } from '@/store/network';
 import { useUserStore } from '@/store/user';
 import { LiveRoomTypeEnum } from '@/types/ILiveRoom';
+import { IUser } from '@/types/IUser';
 import { WsDisableSpeakingType, WsMsgTypeEnum } from '@/types/websocket';
-import { formatMoney, formatTimeHour, handleUserMedia } from '@/utils';
-import { initAdsbygoogle } from '@/utils/google-ad';
+import { formatMoney, formatTimeHour } from '@/utils';
 import { NODE_ENV } from 'script/constant';
 
 import RechargeCpt from './recharge/index.vue';
@@ -492,7 +498,8 @@ const appStore = useAppStore();
 const networkStore = useNetworkStore();
 const { t } = useI18n();
 
-const roomId = ref(route.params.roomId as string);
+const roomId = ref('');
+const anchorInfo = ref<IUser>();
 const configBg = ref();
 const configVideo = ref();
 const giftGoodsList = ref<IGoods[]>([]);
@@ -514,14 +521,13 @@ const isBilibili = ref(false);
 
 const {
   initWs,
+  initRtcReceive,
   initPull,
   closeWs,
   closeRtc,
   keydownDanmu,
-  sendDanmu,
   handlePlay,
   videoWrapRef,
-  danmuMsgType,
   msgIsFile,
   mySocketId,
   videoResolution,
@@ -530,10 +536,10 @@ const {
   damuList,
   liveUserList,
   danmuStr,
-  anchorInfo,
-} = usePull(roomId.value);
+} = usePull();
 
-// const { initWs } = useWebsocket();
+const { initRoomId, sendDanmuTxt, sendDanmuImg, sendDanmuReward } =
+  useWebsocket();
 
 const rtcRtt = computed(() => {
   const arr: any[] = [];
@@ -551,8 +557,39 @@ const rtcLoss = computed(() => {
   return arr.join();
 });
 
-onMounted(() => {
-  initAdsbygoogle();
+const rtcFps = computed(() => {
+  const arr: any[] = [];
+  networkStore.rtcMap.forEach((rtc) => {
+    arr.push(`${Number(rtc.inboundFps.toFixed(2))}`);
+  });
+  return arr.join();
+});
+const rtcBytesSent = computed(() => {
+  const arr: any[] = [];
+  networkStore.rtcMap.forEach((rtc) => {
+    arr.push(`${Number(rtc.bytesSent.toFixed(0))}kb/s`);
+  });
+  return arr.join();
+});
+const rtcBytesReceived = computed(() => {
+  const arr: any[] = [];
+  networkStore.rtcMap.forEach((rtc) => {
+    arr.push(`${Number(rtc.bytesReceived.toFixed(0))}kb/s`);
+  });
+  return arr.join();
+});
+
+onMounted(async () => {
+  roomId.value = route.params.roomId as string;
+  initPull({ roomId: roomId.value, autolay: true });
+  if (route.query[URL_QUERY.isBilibili] === '1') {
+    isBilibili.value = true;
+    const res = await fetchLiveRoomBilibili();
+    roomId.value = `${res.data.id!}`;
+  }
+  initRoomId(roomId.value);
+  await handleFindLiveRoomInfo();
+  if (!appStore.liveRoomInfo) return;
   appStore.videoControls.fps = true;
   appStore.videoControls.fullMode = true;
   appStore.videoControls.kbs = true;
@@ -577,19 +614,15 @@ onMounted(() => {
         topRef.value.getBoundingClientRect().height);
     height.value = res;
   }
-  getBg();
-  if (route.query.is_bilibili !== '1') {
-    isBilibili.value = false;
-    initPull({});
+  if (isBilibili.value) {
+    initWs({ roomId: roomId.value, isBilibili: true, isAnchor: false });
   } else {
     initWs({
       roomId: roomId.value,
-      isRemoteDesk: false,
-      isBilibili: true,
+      isBilibili: false,
       isAnchor: false,
     });
-    isBilibili.value = true;
-    handleBilibil();
+    initRtcReceive();
   }
   getGiftRecord();
   getGiftGroupList();
@@ -602,37 +635,56 @@ onUnmounted(() => {
   clearInterval(loopGetLiveUserTimer.value);
 });
 
-async function handleBilibil() {
-  if (route.query.is_bilibili === '1') {
-    const flv = await fetchLiveBilibiliPlayUrl({
-      cid: route.params.roomId,
-      platform: 'web',
-    });
-    const hls = await fetchLiveBilibiliPlayUrl({
-      cid: route.params.roomId,
-      platform: 'h5',
-    });
-    const roomInfo = await fetchLiveBilibiliRoomGetInfo({
-      room_id: route.params.roomId,
-    });
-    console.log('roomInfo', roomInfo);
-    console.log(flv?.data?.data?.durl?.[0].url, 'flv');
-    console.log(hls?.data?.data?.durl?.[0].url, 'hls');
-    roomLiving.value = true;
-    appStore.liveLine = LiveLineEnum.hls;
-    anchorInfo.value = {
-      avatar: roomInfo?.data?.data?.user_cover,
-      username: roomInfo?.data?.data?.title,
-    };
-    appStore.liveRoomInfo = {
-      type: LiveRoomTypeEnum.system,
-      flv_url: flv?.data?.data?.durl?.[0].url,
-      hls_url: hls?.data?.data?.durl?.[0].url,
-      areas: [{ name: roomInfo?.data?.data?.area_name }],
-      desc: roomInfo?.data?.data?.description,
-    };
-    handleRefresh();
+async function handleFindLiveRoomInfo() {
+  try {
+    const res = await fetchFindLiveRoom(Number(roomId.value));
+    if (res.code === 200) {
+      if (res.data) {
+        appStore.liveRoomInfo = res.data;
+        anchorInfo.value = res.data.user_live_room?.user;
+        if (res.data.live) {
+          roomLiving.value = true;
+        } else {
+          videoLoading.value = false;
+        }
+        if (isBilibili.value) {
+          handleBilibil();
+        }
+      }
+    }
+  } catch (error) {
+    console.log(error);
   }
+}
+
+async function handleBilibil() {
+  const flv = await fetchLiveBilibiliPlayUrl({
+    cid: route.params.roomId,
+    platform: 'web',
+  });
+  const hls = await fetchLiveBilibiliPlayUrl({
+    cid: route.params.roomId,
+    platform: 'h5',
+  });
+  const roomInfo = await fetchLiveBilibiliRoomGetInfo({
+    room_id: route.params.roomId,
+  });
+  console.log(flv?.data?.data?.durl?.[0].url, 'flv');
+  console.log(hls?.data?.data?.durl?.[0].url, 'hls');
+  roomLiving.value = true;
+  appStore.liveLine = LiveLineEnum.hls;
+  anchorInfo.value = {
+    avatar: roomInfo?.data?.data?.user_cover,
+    username: roomInfo?.data?.data?.title,
+  };
+  appStore.liveRoomInfo = {
+    type: LiveRoomTypeEnum.system,
+    flv_url: flv?.data?.data?.durl?.[0].url,
+    hls_url: hls?.data?.data?.durl?.[0].url,
+    areas: [{ name: roomInfo?.data?.data?.area_name }],
+    desc: roomInfo?.data?.data?.description,
+  };
+  handleRefresh();
 }
 
 function handleSendGetLiveUser(liveRoomId: number) {
@@ -649,8 +701,8 @@ function handleSendGetLiveUser(liveRoomId: number) {
 }
 
 function handleSendDanmu() {
-  danmuMsgType.value = DanmuMsgTypeEnum.danmu;
-  sendDanmu();
+  sendDanmuTxt(danmuStr.value);
+  danmuStr.value = '';
 }
 
 async function getGiftGroupList() {
@@ -690,54 +742,29 @@ async function handleHistoryMsg() {
       orderName: 'created_at',
       orderBy: 'desc',
       live_room_id: Number(roomId.value),
-      is_show: WsMessageMsgIsShowEnum.yes,
-      is_verify: WsMessageMsgIsVerifyEnum.yes,
+      is_show: WsMessageIsShowEnum.yes,
+      is_verify: WsMessageIsVerifyEnum.yes,
     });
     if (res.code === 200) {
       res.data.rows.forEach((v) => {
-        damuList.value.unshift({
-          ...v,
-          live_room_id: v.live_room_id!,
-          msg_id: v.id!,
-          socket_id: '',
-          msgType: v.msg_type!,
-          msgIsFile: v.msg_is_file!,
-          userInfo: v.user,
-          msg: v.content!,
-          username: v.username!,
-          send_msg_time: Number(v.send_msg_time),
-          redbag_send_id: v.redbag_send_id,
-        });
+        damuList.value.unshift(v);
       });
       if (
         appStore.liveRoomInfo?.system_msg &&
         appStore.liveRoomInfo?.system_msg !== ''
       ) {
         damuList.value.push({
+          send_msg_time: +new Date(),
           live_room_id: Number(roomId.value),
-          socket_id: '',
-          msgType: DanmuMsgTypeEnum.system,
-          msgIsFile: WsMessageMsgIsFileEnum.no,
-          msg: appStore.liveRoomInfo.system_msg,
-          send_msg_time: Number(+new Date()),
+          id: -1,
+          content: appStore.liveRoomInfo.system_msg,
+          content_type: WsMessageContentTypeEnum.txt,
+          msg_type: DanmuMsgTypeEnum.system,
         });
       }
     }
   } catch (error) {
     console.log(error);
-  }
-}
-
-async function handlePk() {
-  const stream = await handleUserMedia({ video: true, audio: true });
-  const rtc = networkStore.rtcMap.get(`${roomId.value}`)!;
-  if (rtc?.peerConnection) {
-    rtc.peerConnection.onnegotiationneeded = () => {
-      console.log('onnegotiationneeded');
-    };
-    stream?.getTracks().forEach((track) => {
-      rtc.peerConnection?.addTrack(track, stream);
-    });
   }
 }
 
@@ -752,11 +779,14 @@ watch(
 
 watch(
   () => appStore.liveRoomInfo,
-  () => {
-    getBg();
+  (newval) => {
+    if (newval) {
+      getBg();
+    }
   },
   {
     deep: true,
+    immediate: true,
   }
 );
 
@@ -765,7 +795,13 @@ watch(
  * 主播开播了，可以禁言所有看自己直播的用户
  * 使用redis存储记录，key是主播直播间id，value是禁言用户id
  */
-function handleDisableSpeakingUser({ socketId, userId }) {
+function handleDisableSpeakingUser({
+  socketId,
+  userId,
+}: {
+  socketId?;
+  userId;
+}) {
   console.log('handleDisableSpeakingUser');
   const instance = networkStore.wsMap.get(roomId.value);
   if (instance) {
@@ -782,7 +818,13 @@ function handleDisableSpeakingUser({ socketId, userId }) {
   }
 }
 
-function handleRestoreSpeakingUser({ socketId, userId }) {
+function handleRestoreSpeakingUser({
+  socketId,
+  userId,
+}: {
+  socketId?;
+  userId;
+}) {
   console.log('handleRestoreSpeakingUser');
   const instance = networkStore.wsMap.get(roomId.value);
   if (instance) {
@@ -858,20 +900,18 @@ async function uploadChange() {
   if (fileList?.length) {
     try {
       msgLoading.value = true;
-      msgIsFile.value = WsMessageMsgIsFileEnum.yes;
-      const res = await useQiniuJsUpload({
-        prefix: QINIU_RESOURCE.prefix['billd-live/msg-image/'],
+      msgIsFile.value = WsMessageIsFileEnum.yes;
+      const res = await useUpload({
+        prefix: QINIU_KODO.hssblog.prefix['billd-live/msg-image/'],
         file: fileList[0],
       });
       if (res?.resultUrl) {
-        danmuMsgType.value = DanmuMsgTypeEnum.danmu;
-        danmuStr.value = res.resultUrl || '错误图片';
-        sendDanmu();
+        sendDanmuImg(res.resultUrl || '错误图片');
       }
     } catch (error) {
       console.log(error);
     } finally {
-      msgIsFile.value = WsMessageMsgIsFileEnum.no;
+      msgIsFile.value = WsMessageIsFileEnum.no;
       msgLoading.value = false;
       if (uploadRef.value) {
         uploadRef.value.value = '';
@@ -884,20 +924,22 @@ async function handlePay(item: IGoods) {
   if (!loginTip()) {
     return;
   }
-  const res = await fetchGiftRecordCreate({
-    goodsId: item.id!,
-    goodsNums: 1,
-    liveRoomId: Number(roomId.value),
-    isBilibili: isBilibili.value,
-  });
-  if (res.code === 200) {
-    window.$message.success('打赏成功！');
-    danmuMsgType.value = DanmuMsgTypeEnum.reward;
-    danmuStr.value = item.name || '';
-    sendDanmu();
+  try {
+    const res = await fetchGiftRecordCreate({
+      goodsId: item.id!,
+      goodsNums: 1,
+      liveRoomId: Number(roomId.value),
+      isBilibili: false,
+    });
+    if (res.code === 200) {
+      window.$message.success('打赏成功！');
+      sendDanmuReward(item.name || '');
+    }
+    userStore.updateMyWallet();
+    getGiftGroupList();
+  } catch (error) {
+    console.log(error);
   }
-  userStore.updateMyWallet();
-  getGiftGroupList();
 }
 
 function handleFullScreen() {
@@ -1092,21 +1134,18 @@ function handleScrollTop() {
                 background-color: #e3e5e7;
               }
             }
-            .rtt,
-            .loss {
-              margin-right: 10px;
-              font-size: 14px;
+            .rtc-info {
+              display: flex;
+              align-items: center;
+              .item {
+                margin-right: 10px;
+                font-size: 14px;
+              }
             }
           }
           .bottom {
             display: flex;
             font-size: 14px;
-            .desc {
-              width: 400px;
-              cursor: pointer;
-
-              @extend %singleEllipsis;
-            }
             .area {
               margin: 0 10px;
               color: #9499a0;
@@ -1172,6 +1211,15 @@ function handleScrollTop() {
           margin: 0 auto;
           height: calc(100% - 80px - 100px);
           transform: translate(-50%, -50%);
+        }
+      }
+      .video-controls {
+        display: none;
+      }
+
+      &:hover {
+        .video-controls {
+          display: block;
         }
       }
 

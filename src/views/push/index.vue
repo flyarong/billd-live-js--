@@ -80,6 +80,16 @@
         ref="bottomRef"
         class="room-control"
       >
+        <span
+          v-if="NODE_ENV === 'development'"
+          class="debug-info"
+        >
+          <span>{{
+            liveRoomTypeEnumMap[appStore.liveRoomInfo?.type + '']
+          }}</span>
+          <span>：</span>
+          <span>{{ mySocketId }}</span>
+        </span>
         <div class="info">
           <div
             class="avatar"
@@ -87,37 +97,57 @@
           ></div>
           <div class="detail">
             <div class="top">
-              <div class="name">
-                <div class="ipt">
+              <div
+                class="name"
+                v-if="appStore.liveRoomInfo"
+              >
+                名称：
+                <div class="val">
                   <n-input-group>
                     <n-input
-                      v-model:value="roomName"
+                      v-model:value="appStore.liveRoomInfo.name"
                       size="small"
-                      placeholder="输入房间名"
+                      placeholder="请输入房间名"
                     />
                     <n-button
                       size="small"
                       type="primary"
-                      @click="confirmRoomName"
+                      @click="changeLiveRoomName"
                     >
                       确定
                     </n-button>
                   </n-input-group>
                 </div>
+              </div>
+              <div class="area">
+                分区：
+                <div class="val">
+                  <n-input-group>
+                    <n-select
+                      v-model:value="currentArea"
+                      :options="areaList"
+                      size="small"
+                      placeholder="请选择分区"
+                    />
+
+                    <n-button
+                      size="small"
+                      type="primary"
+                      @click="changeLiveRoomArea"
+                    >
+                      确定
+                    </n-button>
+                  </n-input-group>
+                </div>
+              </div>
+              <div class="rtc-info">
                 <div class="item">延迟：{{ rtcRtt || '-' }}</div>
                 <div class="item">丢包：{{ rtcLoss || '-' }}</div>
+                <div class="item">帧率：{{ rtcFps || '-' }}</div>
+                <div class="item">发送码率：{{ rtcBytesSent || '-' }}</div>
+                <div class="item">接收码率：{{ rtcBytesReceived || '-' }}</div>
               </div>
               <div class="other">
-                <span
-                  v-if="NODE_ENV === 'development'"
-                  class="item"
-                >
-                  <span>{{ mySocketId }}</span>
-                  <span>---</span>
-                  <span>{{
-                    liveRoomTypeEnumMap[appStore.liveRoomInfo?.type || '']
-                  }}</span>
-                </span>
                 <span
                   class="item share"
                   @click="handleShare"
@@ -310,51 +340,44 @@
               :key="index"
               class="item"
             >
-              <template v-if="item.msgType === DanmuMsgTypeEnum.danmu">
+              <template v-if="item.msg_type === DanmuMsgTypeEnum.danmu">
                 <span class="time">
-                  [{{ formatTimeHour(item.send_msg_time) }}]
+                  [{{ formatTimeHour(item.send_msg_time!) }}]
                 </span>
                 <span class="name">
-                  <span v-if="item.userInfo">
-                    {{ item.userInfo.username }}[{{
-                      item.userInfo.roles?.map((v) => v.role_name).join()
-                    }}]
-                  </span>
-                  <span v-else>{{ item.socket_id }}[游客]</span>
+                  {{ item.username }}[{{
+                    item.user?.roles?.map((v) => v.role_name).join()
+                  }}]
                 </span>
                 <span>：</span>
                 <span
                   class="msg"
-                  v-if="item.msgIsFile === WsMessageMsgIsFileEnum.no"
+                  v-if="item.content_type === WsMessageContentTypeEnum.txt"
                 >
-                  {{ item.msg }}
+                  {{ item.content }}
                 </span>
                 <div
                   class="msg img"
                   v-else
                 >
                   <img
-                    v-lazy="item.msg"
+                    v-lazy="item.content"
                     alt=""
                     @load="handleScrollTop"
                   />
                 </div>
               </template>
-              <template v-else-if="item.msgType === DanmuMsgTypeEnum.otherJoin">
-                <span class="name system">系统通知：</span>
-                <span class="msg">
-                  <span>{{ item.userInfo?.username || item.socket_id }}</span>
-                  <span>进入直播！</span>
-                </span>
-              </template>
               <template
-                v-else-if="item.msgType === DanmuMsgTypeEnum.userLeaved"
+                v-else-if="item.msg_type === DanmuMsgTypeEnum.otherJoin"
               >
                 <span class="name system">系统通知：</span>
-                <span class="msg">
-                  <span>{{ item.userInfo?.username || item.socket_id }}</span>
-                  <span>离开直播！</span>
-                </span>
+                <span class="msg">{{ item.username }}进入直播！</span>
+              </template>
+              <template
+                v-else-if="item.msg_type === DanmuMsgTypeEnum.userLeaved"
+              >
+                <span class="name system">系统通知：</span>
+                <span class="msg">{{ item.username }}离开直播！</span>
               </template>
             </div>
           </div>
@@ -449,7 +472,7 @@ import {
   VolumeMuteOutline,
 } from '@vicons/ionicons5';
 import { AVRecorder } from '@webav/av-recorder';
-import { copyToClipBoard, getRandomString } from 'billd-utils';
+import { copyToClipBoard } from 'billd-utils';
 import { fabric } from 'fabric';
 import {
   Raw,
@@ -464,10 +487,11 @@ import {
 import { useRoute } from 'vue-router';
 
 import { fetchLiveRoomOnlineUser } from '@/api/live';
+import { fetchUpdateMyLiveRoom } from '@/api/liveRoom';
 import { fetchGetWsMessageList } from '@/api/wsMessage';
 import {
-  QINIU_RESOURCE,
   THEME_COLOR,
+  URL_QUERY,
   liveRoomTypeEnumMap,
   mediaTypeEnumMap,
 } from '@/constant';
@@ -476,20 +500,22 @@ import { commentAuthTip, loginTip } from '@/hooks/use-login';
 import { usePush } from '@/hooks/use-push';
 import { useRTCParams } from '@/hooks/use-rtcParams';
 import { useTip } from '@/hooks/use-tip';
-import { useQiniuJsUpload } from '@/hooks/use-upload';
+import { useUpload } from '@/hooks/use-upload';
+import { useWebsocket } from '@/hooks/use-websocket';
 import {
   DanmuMsgTypeEnum,
   MediaTypeEnum,
-  WsMessageMsgIsFileEnum,
-  WsMessageMsgIsShowEnum,
-  WsMessageMsgIsVerifyEnum,
+  WsMessageContentTypeEnum,
+  WsMessageIsFileEnum,
+  WsMessageIsShowEnum,
+  WsMessageIsVerifyEnum,
 } from '@/interface';
+import { QINIU_KODO } from '@/spec-config';
 import { AppRootState, useAppStore } from '@/store/app';
-import { usePiniaCacheStore } from '@/store/cache';
+import { useCacheStore } from '@/store/cache';
 import { useNetworkStore } from '@/store/network';
 import { useUserStore } from '@/store/user';
 import { LiveRoomTypeEnum } from '@/types/ILiveRoom';
-import { WsMsgTypeEnum, WsUpdateLiveRoomCoverImg } from '@/types/websocket';
 import {
   base64ToFile,
   createVideo,
@@ -514,7 +540,7 @@ const route = useRoute();
 const userStore = useUserStore();
 const appStore = useAppStore();
 const networkStore = useNetworkStore();
-const cacheStore = usePiniaCacheStore();
+const cacheStore = useCacheStore();
 const {
   maxBitrate,
   maxFramerate,
@@ -525,12 +551,11 @@ const {
 } = useRTCParams();
 
 const {
-  confirmRoomName,
   startLive,
   endLive,
-  sendDanmu,
   keydownDanmu,
   sendBlob,
+  sendRoomNoLive,
   roomId,
   msgIsFile,
   mySocketId,
@@ -542,10 +567,11 @@ const {
   currentAudioContentHint,
   currentVideoContentHint,
   danmuStr,
-  roomName,
   damuList,
   liveUserList,
 } = usePush();
+
+const { sendDanmuTxt, sendDanmuImg } = useWebsocket();
 
 const addMediaOkMap = ref(new Map());
 const currentMediaType = ref(MediaTypeEnum.camera);
@@ -578,13 +604,15 @@ const wrapSize = reactive({
   height: 0,
 });
 const bodyAppendChildElArr = ref<HTMLElement[]>([]);
-const liveType = Number(route.query.liveType);
+const liveType = Number(route.query[URL_QUERY.liveType]);
 const recorder = ref<MediaRecorder>();
 const bolbId = ref(0);
 const msrDelay = ref(1000 * 1);
 const msrMaxDelay = ref(1000 * 5);
 const suggestedName = ref('');
 const recordVideoTimer = ref();
+const areaList = ref<{ label: string; value: number }[]>([]);
+const currentArea = ref(-1);
 const recordVideoTime = ref('00:00:00');
 let avRecorder: AVRecorder | null = null;
 const loopGetLiveUserTimer = ref();
@@ -604,12 +632,33 @@ const rtcLoss = computed(() => {
   });
   return arr.join();
 });
+const rtcFps = computed(() => {
+  const arr: any[] = [];
+  networkStore.rtcMap.forEach((rtc) => {
+    arr.push(`${Number(rtc.outboundFps.toFixed(2))}`);
+  });
+  return arr.join();
+});
+const rtcBytesSent = computed(() => {
+  const arr: any[] = [];
+  networkStore.rtcMap.forEach((rtc) => {
+    arr.push(`${Number(rtc.bytesSent.toFixed(0))}kb/s`);
+  });
+  return arr.join();
+});
+const rtcBytesReceived = computed(() => {
+  const arr: any[] = [];
+  networkStore.rtcMap.forEach((rtc) => {
+    arr.push(`${Number(rtc.bytesReceived.toFixed(0))}kb/s`);
+  });
+  return arr.join();
+});
 
 watch(
   () => roomLiving.value,
   (newval) => {
     if (!newval) {
-      handleEndLive();
+      endLive();
       useTip({
         content: '直播已结束',
         hiddenCancel: true,
@@ -725,7 +774,7 @@ watch(
 );
 
 watch(
-  () => route.query.roomId,
+  () => route.query[URL_QUERY.roomId],
   (newval) => {
     if (newval) {
       handleSendGetLiveUser(Number(newval));
@@ -737,8 +786,48 @@ watch(
   }
 );
 
+function roomNameIsOk() {
+  if (!appStore.liveRoomInfo) return;
+  if (!appStore.liveRoomInfo.name!.length) {
+    window.$message.warning('请输入房间名！');
+    return false;
+  }
+  if (
+    appStore.liveRoomInfo.name!.length < 3 ||
+    appStore.liveRoomInfo.name!.length > 20
+  ) {
+    window.$message.warning('房间名要求3-20个字符！');
+    return false;
+  }
+  return true;
+}
+
+async function changeLiveRoomName() {
+  if (!roomNameIsOk()) return;
+  if (appStore.liveRoomInfo) {
+    const res = await fetchUpdateMyLiveRoom(appStore.liveRoomInfo);
+    if (res.code === 200) {
+      window.$message.success('修改成功！');
+    }
+  }
+}
+
+async function changeLiveRoomArea() {
+  if (appStore.liveRoomInfo) {
+    appStore.liveRoomInfo.areas = appStore.areaList.filter(
+      (v) => v.id === currentArea.value
+    );
+    // @ts-ignore
+    const res = await fetchUpdateMyLiveRoom({ areas: [currentArea.value] });
+    if (res.code === 200) {
+      window.$message.success('修改成功！');
+    }
+  }
+}
+
 function handleSendDanmu() {
-  sendDanmu();
+  sendDanmuTxt(danmuStr.value);
+  danmuStr.value = '';
 }
 
 function handlePushStr(str) {
@@ -789,19 +878,18 @@ async function uploadChange() {
   if (fileList?.length) {
     try {
       msgLoading.value = true;
-      msgIsFile.value = WsMessageMsgIsFileEnum.yes;
-      const res = await useQiniuJsUpload({
-        prefix: QINIU_RESOURCE.prefix['billd-live/msg-image/'],
+      msgIsFile.value = WsMessageIsFileEnum.yes;
+      const res = await useUpload({
+        prefix: QINIU_KODO.hssblog.prefix['billd-live/msg-image/'],
         file: fileList[0],
       });
       if (res?.resultUrl) {
-        danmuStr.value = res.resultUrl || '错误图片';
-        sendDanmu();
+        sendDanmuImg(res.resultUrl || '错误图片');
       }
     } catch (error) {
       console.log(error);
     } finally {
-      msgIsFile.value = WsMessageMsgIsFileEnum.no;
+      msgIsFile.value = WsMessageIsFileEnum.no;
       msgLoading.value = false;
       if (uploadRef.value) {
         uploadRef.value.value = '';
@@ -885,6 +973,39 @@ watch(
     if (newval) {
       handleHistoryMsg();
     }
+  }
+);
+
+watch(
+  () => appStore.areaList,
+  (newval) => {
+    if (newval) {
+      const res: any[] = [];
+      appStore.areaList.forEach((v) => {
+        res.push({ label: v.name, value: v.id });
+      });
+      areaList.value = res;
+    }
+  },
+  {
+    immediate: true,
+    deep: true,
+  }
+);
+
+watch(
+  () => appStore.liveRoomInfo,
+  (newval) => {
+    if (newval) {
+      const area = newval.areas?.[0];
+      if (area) {
+        currentArea.value = area.id!;
+      }
+    }
+  },
+  {
+    immediate: true,
+    deep: true,
   }
 );
 
@@ -1095,12 +1216,17 @@ function handleMixedAudio() {
 }
 
 function handleEndLive() {
+  clearLoop();
+  endLive();
+  sendRoomNoLive();
+}
+
+function clearLoop() {
   worker.value?.postMessage({
     type: 'request-clear-loop',
     timer: workerMsrTimerId.value,
   });
   recorder.value?.removeEventListener('dataavailable', handleSendBlob);
-  endLive();
 }
 
 async function handleHistoryMsg() {
@@ -1111,36 +1237,24 @@ async function handleHistoryMsg() {
       orderName: 'created_at',
       orderBy: 'desc',
       live_room_id: Number(roomId.value),
-      is_show: WsMessageMsgIsShowEnum.yes,
-      is_verify: WsMessageMsgIsVerifyEnum.yes,
+      is_show: WsMessageIsShowEnum.yes,
+      is_verify: WsMessageIsVerifyEnum.yes,
     });
     if (res.code === 200) {
       res.data.rows.forEach((v) => {
-        damuList.value.unshift({
-          ...v,
-          live_room_id: v.live_room_id!,
-          msg_id: v.id!,
-          socket_id: '',
-          msgType: v.msg_type!,
-          msgIsFile: v.msg_is_file!,
-          userInfo: v.user,
-          msg: v.content!,
-          username: v.username!,
-          send_msg_time: Number(v.send_msg_time),
-          redbag_send_id: v.redbag_send_id,
-        });
+        damuList.value.unshift(v);
       });
       if (
         appStore.liveRoomInfo?.system_msg &&
         appStore.liveRoomInfo?.system_msg !== ''
       ) {
         damuList.value.push({
+          send_msg_time: +new Date(),
           live_room_id: Number(roomId.value),
-          socket_id: '',
-          msgType: DanmuMsgTypeEnum.system,
-          msgIsFile: WsMessageMsgIsFileEnum.no,
-          msg: appStore.liveRoomInfo.system_msg,
-          send_msg_time: Number(+new Date()),
+          id: -1,
+          content: appStore.liveRoomInfo?.system_msg,
+          content_type: WsMessageContentTypeEnum.txt,
+          msg_type: DanmuMsgTypeEnum.system,
         });
       }
     }
@@ -1212,20 +1326,12 @@ function initAudio() {
 async function uploadLivePreview() {
   const base64 = generateBase64(pushCanvasRef.value!);
   const file = base64ToFile(base64, `tmp.webp`);
-  const uploadRes = await useQiniuJsUpload({
-    prefix: QINIU_RESOURCE.prefix['billd-live/live-preview/'],
+  const uploadRes = await useUpload({
+    prefix: QINIU_KODO.hssblog.prefix['billd-live/live-preview/'],
     file,
   });
   if (uploadRes.flag && uploadRes.resultUrl) {
-    networkStore.wsMap
-      .get(roomId.value)
-      ?.send<WsUpdateLiveRoomCoverImg['data']>({
-        requestId: getRandomString(8),
-        msgType: WsMsgTypeEnum.updateLiveRoomCoverImg,
-        data: {
-          cover_img: uploadRes.resultUrl,
-        },
-      });
+    fetchUpdateMyLiveRoom({ cover_img: uploadRes.resultUrl });
   }
 }
 
@@ -1584,7 +1690,7 @@ async function handleCache() {
     obj.type = item.type;
     obj.hidden = item.hidden;
     obj.mediaName = item.mediaName;
-    obj.muted = item.muted;
+    obj.muted = true;
     obj.volume = item.volume;
     obj.rect = item.rect;
     obj.scaleInfo = item.scaleInfo;
@@ -1596,7 +1702,7 @@ async function handleCache() {
         const { videoEl, stream, canvasDom } = await autoCreateVideo({
           file,
           id: obj.id,
-          muted: item.muted,
+          muted: true,
           rect: item.rect,
           scaleInfo: item.scaleInfo,
         });
@@ -2575,11 +2681,18 @@ function handleStartMedia(item: { type: MediaTypeEnum; txt: string }) {
       }
     }
     .room-control {
+      position: relative;
       display: flex;
       justify-content: space-between;
       padding: 15px;
       border-radius: 0 0 6px 6px;
       background-color: papayawhip;
+      .debug-info {
+        position: absolute;
+        right: 0;
+        bottom: 0;
+        font-size: 14px;
+      }
       .info {
         display: flex;
         width: 100%;
@@ -2606,12 +2719,21 @@ function handleStartMedia(item: { type: MediaTypeEnum; txt: string }) {
             .name {
               display: flex;
               align-items: center;
-              .ipt {
-                margin-right: 15px;
-                width: 200px;
+              margin-right: 15px;
+              .val {
+                width: 180px;
               }
-              .item {
-                padding-right: 10px;
+            }
+            .rtc-info {
+              display: flex;
+              flex: 1;
+            }
+            .area {
+              display: flex;
+              align-items: center;
+              margin-right: 15px;
+              .val {
+                width: 130px;
               }
             }
             .other {
@@ -2839,7 +2961,7 @@ function handleStartMedia(item: { type: MediaTypeEnum; txt: string }) {
           outline: none;
           border: 1px solid hsla(0, 0%, 60%, 0.2);
           border-radius: 4px;
-          background-color: #f1f2f3;
+          background-color: #f5f6f7;
           font-size: 14px;
         }
         .btn {

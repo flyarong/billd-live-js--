@@ -42,7 +42,7 @@
               :step="1"
               vertical
               :tooltip="false"
-              @update-value="(v) => cacheStore.setVolume(v)"
+              @update-value="(v) => (cacheStore.volume = v)"
             />
           </div>
         </n-popover>
@@ -201,7 +201,7 @@ import { onMounted, onUnmounted } from 'vue';
 import { handleTip } from '@/hooks/use-common';
 import { LiveLineEnum, LiveRenderEnum } from '@/interface';
 import { AppRootState, useAppStore } from '@/store/app';
-import { usePiniaCacheStore } from '@/store/cache';
+import { useCacheStore } from '@/store/cache';
 import { LiveRoomTypeEnum } from '@/types/ILiveRoom';
 
 const props = withDefaults(
@@ -219,7 +219,7 @@ const emits = defineEmits([
   'pictureInPicture',
 ]);
 
-const cacheStore = usePiniaCacheStore();
+const cacheStore = useCacheStore();
 const appStore = useAppStore();
 
 const debounceRefresh = debounce(() => {
@@ -265,28 +265,45 @@ function handlePageFull() {
 }
 
 function changeLiveLine(item: LiveLineEnum) {
-  if (
-    [
-      LiveRoomTypeEnum.wertc_live,
-      LiveRoomTypeEnum.wertc_meeting_one,
-      LiveRoomTypeEnum.wertc_meeting_two,
-    ].includes(appStore.liveRoomInfo?.type!) &&
-    item !== LiveLineEnum.rtc
-  ) {
-    window.$message.info('不支持该线路！');
-    return;
-  } else if (
-    ![
-      LiveRoomTypeEnum.wertc_live,
-      LiveRoomTypeEnum.wertc_meeting_one,
-      LiveRoomTypeEnum.wertc_meeting_two,
-    ].includes(appStore.liveRoomInfo?.type!) &&
-    item === LiveLineEnum.rtc
-  ) {
-    window.$message.info('不支持该线路！');
-    return;
+  const type = appStore.liveRoomInfo?.type;
+  if (type === undefined) return;
+  if (item === LiveLineEnum['rtmp-rtc']) {
+    if (
+      [
+        LiveRoomTypeEnum.wertc_live,
+        LiveRoomTypeEnum.wertc_meeting_one,
+        LiveRoomTypeEnum.wertc_meeting_two,
+        LiveRoomTypeEnum.tencent_css,
+        LiveRoomTypeEnum.tencent_css_pk,
+      ].includes(type)
+    ) {
+      window.$message.info('不支持该线路！');
+      return;
+    }
+  } else if (item === LiveLineEnum.flv || item === LiveLineEnum.hls) {
+    if (
+      [
+        LiveRoomTypeEnum.wertc_live,
+        LiveRoomTypeEnum.wertc_meeting_one,
+        LiveRoomTypeEnum.wertc_meeting_two,
+      ].includes(type)
+    ) {
+      window.$message.info('不支持该线路！');
+      return;
+    }
+  } else if (item === LiveLineEnum.rtc) {
+    if (
+      ![
+        LiveRoomTypeEnum.wertc_live,
+        LiveRoomTypeEnum.wertc_meeting_one,
+        LiveRoomTypeEnum.wertc_meeting_two,
+      ].includes(type)
+    ) {
+      window.$message.info('不支持该线路！');
+      return;
+    }
   }
-  appStore.setLiveLine(item);
+  appStore.liveLine = item;
 }
 </script>
 
@@ -379,6 +396,11 @@ function changeLiveLine(item: LiveLineEnum) {
             cursor: pointer;
           }
         }
+      }
+    }
+    .line {
+      .list {
+        width: 75px;
       }
     }
 

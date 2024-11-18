@@ -1,19 +1,16 @@
 import { getRandomString, windowReload } from 'billd-utils';
 import { onMounted, onUnmounted, ref, watch } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
 
-import {
-  fetchCreateUserLiveRoom,
-  fetchUserHasLiveRoom,
-} from '@/api/userLiveRoom';
-import { DanmuMsgTypeEnum, WsMessageMsgIsFileEnum } from '@/interface';
+import { fetchCreateUserLiveRoom } from '@/api/userLiveRoom';
+import { loginTip } from '@/hooks/use-login';
+import { useTip } from '@/hooks/use-tip';
+import { useWebsocket } from '@/hooks/use-websocket';
+import { WsMessageIsFileEnum } from '@/interface';
 import { useAppStore } from '@/store/app';
 import { useNetworkStore } from '@/store/network';
 import { useUserStore } from '@/store/user';
-import { ILiveRoom } from '@/types/ILiveRoom';
 import {
   WsConnectStatusEnum,
-  WsMessageType,
   WsMsgTypeEnum,
   WsMsrBlobType,
   WsRoomNoLiveType,
@@ -21,29 +18,22 @@ import {
 import { createVideo, generateBase64 } from '@/utils';
 import { handlConstraints } from '@/utils/network/webRTC';
 
-import { commentAuthTip, loginTip } from './use-login';
-import { useTip } from './use-tip';
-import { useWebsocket } from './use-websocket';
-
 export function usePush() {
-  const route = useRoute();
-  const router = useRouter();
   const appStore = useAppStore();
   const userStore = useUserStore();
   const networkStore = useNetworkStore();
 
   const roomId = ref('');
-  const roomName = ref('');
   const danmuStr = ref('');
-  const liveRoomInfo = ref<ILiveRoom>();
   const localStream = ref<MediaStream>();
   const videoElArr = ref<HTMLVideoElement[]>([]);
-  const msgIsFile = ref<WsMessageMsgIsFileEnum>(WsMessageMsgIsFileEnum.no);
+  const msgIsFile = ref<WsMessageIsFileEnum>(WsMessageIsFileEnum.no);
 
   const {
     roomLiving,
     initWs,
     handleStartLive,
+    sendDanmuTxt,
     connectStatus,
     mySocketId,
     canvasVideoStream,
@@ -156,7 +146,7 @@ export function usePush() {
     () => userStore.userInfo,
     async (newVal) => {
       if (newVal) {
-        const res = await handleUserHasLiveRoom();
+        const res = handleUserHasLiveRoom();
         if (!res) {
           await useTip({
             content: '你还没有直播间，是否立即开通？',
@@ -164,8 +154,7 @@ export function usePush() {
           });
           await handleCreateUserLiveRoom();
         } else {
-          roomName.value = liveRoomInfo.value?.name || '';
-          roomId.value = `${liveRoomInfo.value?.id || ''}`;
+          roomId.value = `${appStore.liveRoomInfo?.id || ''}`;
           connectWs();
         }
       }
@@ -173,16 +162,10 @@ export function usePush() {
     { immediate: true }
   );
 
-  async function handleUserHasLiveRoom() {
-    const res = await fetchUserHasLiveRoom(userStore.userInfo?.id!);
-    if (res.code === 200 && res.data) {
-      liveRoomInfo.value = res.data.live_room;
-      router.push({
-        query: { ...route.query, roomId: liveRoomInfo.value?.id },
-      });
-      return true;
-    }
-    return false;
+  function handleUserHasLiveRoom() {
+    const res = userStore.userInfo?.live_rooms?.[0];
+    appStore.liveRoomInfo = res;
+    return res;
   }
 
   async function handleCreateUserLiveRoom() {
@@ -201,7 +184,6 @@ export function usePush() {
 
   function connectWs() {
     initWs({
-      isRemoteDesk: false,
       isAnchor: true,
       roomId: roomId.value,
       currentMaxBitrate: currentMaxBitrate.value,
@@ -212,7 +194,7 @@ export function usePush() {
 
   async function startLive({ type, msrDelay, msrMaxDelay }) {
     if (!loginTip()) return;
-    const flag = await handleUserHasLiveRoom();
+    const flag = handleUserHasLiveRoom();
     if (!flag) {
       await useTip({
         content: '你还没有直播间，是否立即开通？',
@@ -221,14 +203,10 @@ export function usePush() {
       await handleCreateUserLiveRoom();
       return;
     }
-    if (!roomNameIsOk()) {
-      return;
-    }
     if (connectStatus.value !== WsConnectStatusEnum.connect) {
       window.$message.warning('websocket未连接');
       return;
     }
-
     roomLiving.value = true;
     const el = appStore.allTrack.find((item) => {
       if (item.video === 1) {
@@ -254,7 +232,6 @@ export function usePush() {
       });
     }
     handleStartLive({
-      name: roomName.value,
       type,
       msrDelay,
       msrMaxDelay,
@@ -265,17 +242,20 @@ export function usePush() {
   function endLive() {
     roomLiving.value = false;
     localStream.value = undefined;
+    closeRtc();
+  }
+
+  function sendRoomNoLive() {
     const instance = networkStore.wsMap.get(roomId.value);
     if (instance) {
       instance.send<WsRoomNoLiveType['data']>({
         requestId: getRandomString(8),
         msgType: WsMsgTypeEnum.roomNoLive,
         data: {
-          live_room: appStore.liveRoomInfo!,
+          live_room_id: appStore.liveRoomInfo?.id!,
         },
       });
     }
-    closeRtc();
   }
 
   function sendBlob(data: { blob; blobId: string; delay; max_delay }) {
@@ -295,70 +275,20 @@ export function usePush() {
     }
   }
 
-  function roomNameIsOk() {
-    if (!roomName.value.length) {
-      window.$message.warning('请输入房间名！');
-      return false;
-    }
-    if (roomName.value.length < 3 || roomName.value.length > 20) {
-      window.$message.warning('房间名要求3-20个字符！');
-      return false;
-    }
-    return true;
-  }
-
   function keydownDanmu(event: KeyboardEvent) {
     const key = event.key.toLowerCase();
     if (key === 'enter') {
       event.preventDefault();
-      sendDanmu();
+      sendDanmuTxt(danmuStr.value);
     }
-  }
-
-  function confirmRoomName() {
-    if (!roomNameIsOk()) return;
-  }
-
-  function sendDanmu() {
-    if (!loginTip()) {
-      return;
-    }
-    if (!commentAuthTip()) {
-      return;
-    }
-    if (!danmuStr.value.length) {
-      window.$message.warning('请输入弹幕内容！');
-      return;
-    }
-    const instance = networkStore.wsMap.get(roomId.value);
-    if (!instance) {
-      window.$message.error('还没开播，不能发送弹幕！');
-      return;
-    }
-    instance.send<WsMessageType['data']>({
-      requestId: getRandomString(8),
-      msgType: WsMsgTypeEnum.message,
-      data: {
-        socket_id: '',
-        msg: danmuStr.value,
-        msgType: DanmuMsgTypeEnum.danmu,
-        live_room_id: Number(roomId.value),
-        msgIsFile: msgIsFile.value,
-        send_msg_time: +new Date(),
-        user_agent: navigator.userAgent,
-        isBilibili: false,
-      },
-    });
-    danmuStr.value = '';
   }
 
   return {
-    confirmRoomName,
     startLive,
     endLive,
-    sendDanmu,
     keydownDanmu,
     sendBlob,
+    sendRoomNoLive,
     roomId,
     msgIsFile,
     mySocketId,
@@ -372,9 +302,7 @@ export function usePush() {
     currentAudioContentHint,
     currentVideoContentHint,
     danmuStr,
-    roomName,
     damuList,
     liveUserList,
-    liveRoomInfo,
   };
 }

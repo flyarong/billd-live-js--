@@ -19,26 +19,33 @@ export default {
 <script lang="ts" setup>
 import { isMobile } from 'billd-utils';
 import { GlobalThemeOverrides, NConfigProvider } from 'naive-ui';
-import { onMounted, ref } from 'vue';
+import { onMounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 
 import { fetchSettingsList } from '@/api/settings';
 import { THEME_COLOR, appBuildInfo } from '@/constant';
 import { useCheckUpdate } from '@/hooks/use-common';
+import { useGoogleAd } from '@/hooks/use-google-ad';
 import { loginMessage } from '@/hooks/use-login';
-import { usePiniaCacheStore } from '@/store/cache';
+import { useCacheStore } from '@/store/cache';
 import { useUserStore } from '@/store/user';
 import { getHostnameUrl } from '@/utils';
 import { getLastBuildDate, setLastBuildDate } from '@/utils/localStorage/app';
 import { getToken } from '@/utils/localStorage/user';
 
+import { fetchAreaList } from './api/area';
+import { fetchGlobalMsgMyList } from './api/globalMsg';
+import { useTip } from './hooks/use-tip';
+import { useAppStore } from './store/app';
+
 const { checkUpdate } = useCheckUpdate();
-const cacheStore = usePiniaCacheStore();
+const appStore = useAppStore();
+const cacheStore = useCacheStore();
 const userStore = useUserStore();
 const route = useRoute();
 
 const showModal = ref(false);
-const modalContent = ref('');
+const modalContent = ref('2');
 
 const themeOverrides: GlobalThemeOverrides = {
   common: {
@@ -47,8 +54,21 @@ const themeOverrides: GlobalThemeOverrides = {
   },
 };
 
+watch(
+  () => userStore.userInfo,
+  (newval) => {
+    if (newval) {
+      handleGlobalMsgMyList();
+    }
+  },
+  {
+    immediate: true,
+  }
+);
+
 onMounted(() => {
-  initSettings();
+  useGoogleAd();
+  initGlobalData();
   checkUpdate({
     htmlUrl: getHostnameUrl(),
   });
@@ -77,6 +97,20 @@ onMounted(() => {
   }
 });
 
+async function handleGlobalMsgMyList() {
+  const res = await fetchGlobalMsgMyList({});
+  if (res.code === 200) {
+    const data = res.data.rows[0];
+    if (data) {
+      useTip({
+        content: data.content!,
+        hiddenCancel: true,
+        hiddenClose: true,
+      });
+    }
+  }
+}
+
 function initSettings() {
   setTimeout(async () => {
     if (route.path !== '/') {
@@ -96,6 +130,18 @@ function initSettings() {
       }
     }
   }, 500);
+}
+
+async function getAreaList() {
+  const res = await fetchAreaList({ orderName: 'priority', orderBy: 'desc' });
+  if (res.code === 200) {
+    appStore.areaList = res.data.rows;
+  }
+}
+
+function initGlobalData() {
+  getAreaList();
+  initSettings();
 }
 
 function handleUpdate() {

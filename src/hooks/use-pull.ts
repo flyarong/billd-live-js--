@@ -2,34 +2,46 @@ import { getRandomString } from 'billd-utils';
 import { nextTick, onUnmounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 
-import { commentAuthTip, loginTip } from '@/hooks/use-login';
+import { URL_QUERY } from '@/constant';
 import { useFlvPlay, useHlsPlay } from '@/hooks/use-play';
 import { useWebsocket } from '@/hooks/use-websocket';
+import { useWebRtcRtmpToRtc } from '@/hooks/webrtc/rtmpToRtc';
 import {
   DanmuMsgTypeEnum,
   LiveLineEnum,
   LiveRenderEnum,
-  WsMessageMsgIsFileEnum,
+  WsMessageIsFileEnum,
 } from '@/interface';
 import { useAppStore } from '@/store/app';
-import { usePiniaCacheStore } from '@/store/cache';
+import { useCacheStore } from '@/store/cache';
 import { useNetworkStore } from '@/store/network';
+import { ILiveRoom, LiveRoomTypeEnum } from '@/types/ILiveRoom';
 import {
-  ILiveRoom,
-  LiveRoomTypeEnum,
-  LiveRoomUseCDNEnum,
-} from '@/types/ILiveRoom';
-import { WsMessageType, WsMsgTypeEnum } from '@/types/websocket';
-import { videoFullBox, videoToCanvas } from '@/utils';
+  WsBatchSendOffer,
+  WsMsgTypeEnum,
+  WsOfferType,
+} from '@/types/websocket';
+import {
+  createVideo,
+  handleUserMedia,
+  videoFullBox,
+  videoToCanvas,
+} from '@/utils';
 
-export function usePull(roomId: string) {
+import { useTip } from './use-tip';
+import { useWebRtcLive } from './webrtc/live';
+import { useWebRtcMeetingOne } from './webrtc/meetingOne';
+
+export function usePull() {
   const route = useRoute();
   const networkStore = useNetworkStore();
-  const cacheStore = usePiniaCacheStore();
+  const cacheStore = useCacheStore();
   const appStore = useAppStore();
   const danmuStr = ref('');
-  const msgIsFile = ref(WsMessageMsgIsFileEnum.no);
+  const roomId = ref('');
+  const msgIsFile = ref(WsMessageIsFileEnum.no);
   const danmuMsgType = ref<DanmuMsgTypeEnum>(DanmuMsgTypeEnum.danmu);
+  const liveRoomInfo = ref<ILiveRoom>();
   const autoplayVal = ref(false);
   const videoLoading = ref(false);
   const isPlaying = ref(false);
@@ -38,38 +50,41 @@ export function usePull(roomId: string) {
   const hlsurl = ref('');
   const videoWrapRef = ref<HTMLDivElement>();
   const videoResolution = ref();
-  const isRemoteDesk = ref(false);
-  const videoElArr = ref<HTMLVideoElement[]>([]);
-  const remoteVideo = ref<HTMLElement[]>([]);
+  const remoteVideo = ref<Array<HTMLVideoElement | HTMLCanvasElement>>([]);
+  const remoteStream = ref<MediaStream[]>([]);
   const {
     mySocketId,
     initWs,
-    isBilibili,
     roomLiving,
     anchorInfo,
     liveUserList,
     damuList,
+    sendDanmuTxt,
   } = useWebsocket();
+  const { updateWebRtcRtmpToRtcConfig, webRtcRtmpToRtc } = useWebRtcRtmpToRtc();
+  const { updateWebRtcLiveConfig, webRtcLive } = useWebRtcLive();
+  const { updateWebRtcMeetingOneConfig, webRtcMeetingOne } =
+    useWebRtcMeetingOne();
   const { flvVideoEl, flvIsPlaying, startFlvPlay, destroyFlv } = useFlvPlay();
   const { hlsVideoEl, hlsIsPlaying, startHlsPlay, destroyHls } = useHlsPlay();
   const stopDrawingArr = ref<any[]>([]);
+  const rtcVideo = ref<HTMLVideoElement[]>([]);
+  const userStream = ref<MediaStream>();
+
   let changeWrapSizeFn;
 
   onUnmounted(() => {
     handleStopDrawing();
+    destroyFlv();
+    destroyHls();
   });
 
   function handleStopDrawing() {
-    destroyFlv();
-    destroyHls();
     changeWrapSizeFn = undefined;
     stopDrawingArr.value.forEach((cb) => cb());
     stopDrawingArr.value = [];
     remoteVideo.value.forEach((el) => el.remove());
     remoteVideo.value = [];
-    if (isRemoteDesk.value && videoWrapRef.value) {
-      videoWrapRef.value.removeAttribute('style');
-    }
   }
 
   function handleVideoWrapResize() {
@@ -82,8 +97,8 @@ export function usePull(roomId: string) {
   }
 
   function videoPlay(videoEl: HTMLVideoElement) {
-    stopDrawingArr.value = [];
     stopDrawingArr.value.forEach((cb) => cb());
+    stopDrawingArr.value = [];
     if (appStore.videoControls.renderMode === LiveRenderEnum.canvas) {
       if (videoEl && videoWrapRef.value) {
         const rect = videoWrapRef.value.getBoundingClientRect();
@@ -100,7 +115,6 @@ export function usePull(roomId: string) {
         changeWrapSizeFn = changeWrapSize;
         stopDrawingArr.value.push(stopDrawing);
         remoteVideo.value.push(canvas);
-        videoElArr.value.push(videoEl);
         videoLoading.value = false;
       }
     } else if (appStore.videoControls.renderMode === LiveRenderEnum.video) {
@@ -118,23 +132,30 @@ export function usePull(roomId: string) {
         });
         changeWrapSizeFn = changeWrapSize;
         remoteVideo.value.push(videoEl);
-        videoElArr.value.push(videoEl);
         videoLoading.value = false;
       }
     }
   }
 
-  watch(hlsVideoEl, (newval) => {
-    if (newval) {
-      videoPlay(newval);
+  watch(
+    () => hlsVideoEl.value,
+    (newval) => {
+      if (newval) {
+        // @ts-ignore
+        remoteStream.value.push(newval.captureStream());
+      }
     }
-  });
+  );
 
-  watch(flvVideoEl, (newval) => {
-    if (newval) {
-      videoPlay(newval);
+  watch(
+    () => flvVideoEl.value,
+    (newval) => {
+      if (newval) {
+        // @ts-ignore
+        remoteStream.value.push(newval.captureStream());
+      }
     }
-  });
+  );
 
   watch(
     () => appStore.videoControlsValue.pageFullMode,
@@ -144,64 +165,17 @@ export function usePull(roomId: string) {
   );
 
   watch(
-    () => appStore.videoControls.renderMode,
+    [() => appStore.videoControls.renderMode, () => remoteStream.value],
     () => {
-      if (appStore.liveRoomInfo) {
-        handlePlay(appStore.liveRoomInfo);
-      }
-    }
-  );
-
-  watch(
-    () => networkStore.rtcMap,
-    (newVal) => {
-      if (newVal.size) {
-        roomLiving.value = true;
-        videoLoading.value = false;
-        appStore.playing = true;
-        // cacheStore.muted = false;
-      }
-      if (
-        isRemoteDesk.value ||
-        appStore.liveRoomInfo?.type === LiveRoomTypeEnum.wertc_meeting_one ||
-        appStore.liveRoomInfo?.type === LiveRoomTypeEnum.wertc_live ||
-        appStore.liveRoomInfo?.type === LiveRoomTypeEnum.pk ||
-        appStore.liveRoomInfo?.type === LiveRoomTypeEnum.tencent_css_pk
-      ) {
-        newVal.forEach((item) => {
-          if (appStore.allTrack.find((v) => v.mediaName === item.receiver)) {
-            return;
-          }
-          const rect = videoWrapRef.value?.getBoundingClientRect();
-          if (rect) {
-            videoFullBox({
-              wrapSize: {
-                width: rect.width,
-                height: rect.height,
-              },
-              videoEl: item.videoEl,
-              videoResize: ({ w, h }) => {
-                videoResolution.value = `${w}x${h}`;
-              },
-            });
-            remoteVideo.value.push(item.videoEl);
-            videoElArr.value.push(item.videoEl);
-          }
-        });
-        nextTick(() => {
-          if (isRemoteDesk.value && videoWrapRef.value) {
-            if (newVal.size) {
-              videoWrapRef.value.style.display = 'inline-block';
-            } else {
-              videoWrapRef.value.style.removeProperty('display');
-            }
-          }
-        });
-      }
+      handleStopDrawing();
+      remoteStream.value.forEach((v) => {
+        const el = createVideo({});
+        el.srcObject = v;
+        videoPlay(el);
+      });
     },
     {
       deep: true,
-      immediate: true,
     }
   );
 
@@ -218,11 +192,195 @@ export function usePull(roomId: string) {
     }
   );
 
+  watch(
+    () => cacheStore.muted,
+    (newVal) => {
+      appStore.pageIsClick = true;
+      rtcVideo.value.forEach((v) => {
+        v.muted = newVal;
+      });
+      if (!newVal) {
+        cacheStore.volume = cacheStore.volume || appStore.normalVolume;
+      } else {
+        cacheStore.volume = 0;
+      }
+    }
+  );
+
+  watch(
+    () => cacheStore.volume,
+    (newVal) => {
+      rtcVideo.value.forEach((v) => {
+        v.volume = newVal / 100;
+      });
+      if (!newVal) {
+        cacheStore.muted = true;
+      } else {
+        cacheStore.muted = false;
+      }
+    },
+    {
+      immediate: true,
+    }
+  );
+
+  function handleRtmpToRtcPlay() {
+    console.log('handleRtmpToRtcPlay');
+    handleStopDrawing();
+    videoLoading.value = true;
+    appStore.liveLine = LiveLineEnum['rtmp-rtc'];
+    updateWebRtcRtmpToRtcConfig({
+      isPk: false,
+      roomId: roomId.value,
+    });
+    const videoEl = createVideo({
+      appendChild: true,
+      muted: appStore.pageIsClick ? cacheStore.muted : true,
+    });
+    rtcVideo.value.push(videoEl);
+    webRtcRtmpToRtc.newWebRtc({
+      sender: mySocketId.value,
+      receiver: 'rtmpToRtc',
+      videoEl,
+      sucessCb: (stream) => {
+        remoteStream.value.push(stream);
+      },
+    });
+    webRtcRtmpToRtc.sendOffer({
+      sender: mySocketId.value,
+      receiver: 'rtmpToRtc',
+    });
+  }
+
+  async function handleWebRtcLivePlay(data) {
+    console.log('handleWebRtcLivePlay');
+    handleStopDrawing();
+    videoLoading.value = true;
+    appStore.liveLine = LiveLineEnum.rtc;
+    updateWebRtcLiveConfig({
+      roomId: roomId.value,
+      canvasVideoStream: null,
+    });
+    const videoEl = createVideo({
+      appendChild: true,
+      muted: appStore.pageIsClick ? cacheStore.muted : true,
+    });
+    rtcVideo.value.push(videoEl);
+    webRtcLive.newWebRtc({
+      sender: mySocketId.value,
+      receiver: data.sender,
+      videoEl,
+      sucessCb: (stream) => {
+        remoteStream.value.push(stream);
+      },
+    });
+
+    await webRtcLive.sendAnswer({
+      sender: mySocketId.value,
+      // data.data.receiver是接收者；我们现在new pc，发送者是自己，接收者肯定是房主，不能是data.data.receiver，因为data.data.receiver是自己
+      receiver: data.sender,
+      sdp: data.sdp,
+    });
+  }
+
+  async function handleWebRtcMeetingOnePlay(data) {
+    await handleMeeting();
+    console.log('handleWebRtcLivePlay');
+    handleStopDrawing();
+    videoLoading.value = true;
+    appStore.liveLine = LiveLineEnum.rtc;
+    const videoEl = createVideo({
+      appendChild: true,
+      muted: appStore.pageIsClick ? cacheStore.muted : true,
+    });
+    rtcVideo.value.push(videoEl);
+    webRtcMeetingOne.newWebRtc({
+      // 因为这里是收到offer，而offer是房主发的，所以此时的data.data.sender是房主；data.data.receiver是接收者；
+      // 但是这里的nativeWebRtc的sender，得是自己，不能是data.data.sender，不要混淆
+      sender: mySocketId.value,
+      receiver: data.sender,
+      videoEl,
+      sucessCb: (stream) => {
+        remoteStream.value.push(stream);
+      },
+    });
+    webRtcMeetingOne.addTrack({
+      stream: userStream.value,
+      receiver: data.sender,
+    });
+    await webRtcMeetingOne.sendAnswer({
+      sender: mySocketId.value,
+      // data.data.receiver是接收者；我们现在new pc，发送者是自己，接收者肯定是房主，不能是data.data.receiver，因为data.data.receiver是自己
+      receiver: data.sender,
+      sdp: data.sdp,
+    });
+  }
+
+  async function handleMeeting() {
+    await useTip({
+      content: '是否加入会议？',
+    });
+    const stream = await handleUserMedia({
+      video: true,
+      audio: true,
+    });
+    userStream.value = stream;
+    networkStore.wsMap.get(roomId.value)?.send<WsBatchSendOffer['data']>({
+      requestId: getRandomString(8),
+      msgType: WsMsgTypeEnum.batchSendOffer,
+      data: {
+        roomId: roomId.value,
+      },
+    });
+  }
+
+  function initRtcReceive() {
+    const ws = networkStore.wsMap.get(roomId.value);
+    if (!ws?.socketIo) return;
+    // 收到nativeWebRtcOffer
+    ws.socketIo.on(
+      WsMsgTypeEnum.nativeWebRtcOffer,
+      (data: WsOfferType['data']) => {
+        console.log(
+          '收2到nativeWebRtcOffer',
+          data.live_room.type,
+          LiveRoomTypeEnum.wertc_live,
+          data
+        );
+        if (data.live_room.type === LiveRoomTypeEnum.wertc_live) {
+          if (data.receiver === mySocketId.value) {
+            console.warn('是发给我的nativeWebRtcOffer-wertc_live');
+            if (networkStore.rtcMap.get(data.sender)) {
+              return;
+            }
+            handleWebRtcLivePlay(data);
+          } else {
+            console.error('不是发给我的nativeWebRtcOffer');
+          }
+        } else if (data.live_room.type === LiveRoomTypeEnum.wertc_meeting_one) {
+          if (data.receiver === mySocketId.value) {
+            console.warn('是发给我的nativeWebRtcOffer-wertc_meeting_one');
+            updateWebRtcMeetingOneConfig({
+              roomId: roomId.value,
+              anchorStream: null,
+            });
+            if (networkStore.rtcMap.get(data.sender)) {
+              return;
+            }
+            handleWebRtcMeetingOnePlay(data);
+          } else {
+            console.error('不是发给我的nativeWebRtcOffer');
+          }
+        }
+      }
+    );
+  }
+
   function handleHlsPlay() {
     console.log('handleHlsPlay', hlsurl.value);
     handleStopDrawing();
     videoLoading.value = true;
-    appStore.setLiveLine(LiveLineEnum.hls);
+    appStore.liveLine = LiveLineEnum.hls;
     startHlsPlay({
       hlsurl: hlsurl.value,
     });
@@ -232,7 +390,7 @@ export function usePull(roomId: string) {
     console.log('handleFlvPlay', flvurl.value);
     handleStopDrawing();
     videoLoading.value = true;
-    appStore.setLiveLine(LiveLineEnum.flv);
+    appStore.liveLine = LiveLineEnum.flv;
     startFlvPlay({
       flvurl: flvurl.value,
     });
@@ -240,20 +398,18 @@ export function usePull(roomId: string) {
 
   function handlePlay(data: ILiveRoom) {
     roomLiving.value = true;
-    flvurl.value =
-      data.cdn === LiveRoomUseCDNEnum.yes &&
-      [LiveRoomTypeEnum.tencent_css, LiveRoomTypeEnum.tencent_css_pk].includes(
-        data.type!
-      )
-        ? data.cdn_flv_url!
-        : data.flv_url!;
-    hlsurl.value =
-      data.cdn === LiveRoomUseCDNEnum.yes &&
-      [LiveRoomTypeEnum.tencent_css, LiveRoomTypeEnum.tencent_css_pk].includes(
-        data.type!
-      )
-        ? data.cdn_hls_url!
-        : data.hls_url!;
+    flvurl.value = [
+      LiveRoomTypeEnum.tencent_css,
+      LiveRoomTypeEnum.tencent_css_pk,
+    ].includes(data.type!)
+      ? data.cdn_flv_url!
+      : data.flv_url!;
+    hlsurl.value = [
+      LiveRoomTypeEnum.tencent_css,
+      LiveRoomTypeEnum.tencent_css_pk,
+    ].includes(data.type!)
+      ? data.cdn_hls_url!
+      : data.hls_url!;
     function play() {
       if (appStore.liveLine === LiveLineEnum.flv) {
         handleFlvPlay();
@@ -261,7 +417,7 @@ export function usePull(roomId: string) {
         handleHlsPlay();
       }
     }
-    if (LiveRoomTypeEnum.pk === data.type && !route.query.pkKey) {
+    if (LiveRoomTypeEnum.pk === data.type && !route.query[URL_QUERY.pkKey]) {
       play();
     } else if (
       [
@@ -285,14 +441,14 @@ export function usePull(roomId: string) {
         LiveRoomTypeEnum.wertc_meeting_two,
       ].includes(data.type!)
     ) {
-      appStore.setLiveLine(LiveLineEnum.rtc);
+      appStore.liveLine = LiveLineEnum.rtc;
     }
   }
 
   watch(
     [() => roomLiving.value, () => appStore.liveRoomInfo],
     ([val, liveRoomInfo]) => {
-      if (val && liveRoomInfo) {
+      if (val && liveRoomInfo && liveRoomInfo.type !== undefined) {
         showPlayBtn.value = false;
         if (
           [
@@ -307,13 +463,14 @@ export function usePull(roomId: string) {
             LiveRoomTypeEnum.forward_all,
           ].includes(liveRoomInfo.type!)
         ) {
-          handlePlay(liveRoomInfo!);
-        } else if (LiveRoomTypeEnum.pk === liveRoomInfo.type!) {
-          if (!route.query.pkKey) {
-            handlePlay(liveRoomInfo!);
+          handlePlay(liveRoomInfo);
+        } else if (LiveRoomTypeEnum.pk === liveRoomInfo.type) {
+          if (!route.query[URL_QUERY.pkKey]) {
+            handlePlay(liveRoomInfo);
           }
         }
       }
+      console.log('kkkkk', val, liveRoomInfo?.type);
       if (!roomLiving.value) {
         closeRtc();
         handleStopDrawing();
@@ -329,6 +486,10 @@ export function usePull(roomId: string) {
     () => appStore.liveLine,
     (newVal) => {
       console.log('liveLine变了', newVal);
+      handleStopDrawing();
+      destroyFlv();
+      destroyHls();
+      remoteStream.value = [];
       if (!roomLiving.value) {
         return;
       }
@@ -341,48 +502,10 @@ export function usePull(roomId: string) {
           break;
         case LiveLineEnum.rtc:
           break;
+        case LiveLineEnum['rtmp-rtc']:
+          handleRtmpToRtcPlay();
+          break;
       }
-    }
-  );
-
-  watch(
-    () => cacheStore.muted,
-    (newVal) => {
-      videoElArr.value.forEach((el) => {
-        el.muted = newVal;
-      });
-      if (!newVal) {
-        cacheStore.volume = cacheStore.volume || appStore.normalVolume;
-      } else {
-        cacheStore.volume = 0;
-      }
-    }
-  );
-
-  watch(
-    () => cacheStore.volume,
-    (newVal) => {
-      videoElArr.value.forEach((el) => {
-        el.volume = newVal / 100;
-      });
-      if (!newVal) {
-        cacheStore.muted = true;
-      } else {
-        cacheStore.muted = false;
-      }
-    }
-  );
-
-  watch(
-    () => appStore.playing,
-    (newVal) => {
-      videoElArr.value.forEach((el) => {
-        if (newVal) {
-          el.play();
-        } else {
-          el.pause();
-        }
-      });
     }
   );
 
@@ -400,30 +523,17 @@ export function usePull(roomId: string) {
     }
   );
 
-  watch(
-    () => appStore.remoteDesk.isClose,
-    (newval) => {
-      if (newval) {
-        handleStopDrawing();
-      }
-    }
-  );
-
-  function initPull(data: { autolay?: boolean; isRemoteDesk?: boolean }) {
+  function initPull(data: { autolay?: boolean; roomId: string }) {
+    roomId.value = data.roomId;
     if (data.autolay === undefined) {
       autoplayVal.value = true;
     } else {
       autoplayVal.value = data.autolay;
     }
-    if (autoplayVal.value) {
-      videoLoading.value = true;
-    }
-    isRemoteDesk.value = !!data.isRemoteDesk;
-    initWs({
-      isRemoteDesk: data.isRemoteDesk,
-      roomId,
-      isAnchor: false,
-    });
+    // initWs({
+    //   roomId: roomId.value,
+    //   isAnchor: false,
+    // });
   }
 
   function closeWs() {
@@ -442,47 +552,13 @@ export function usePull(roomId: string) {
     const key = event.key.toLowerCase();
     if (key === 'enter') {
       event.preventDefault();
-      danmuMsgType.value = DanmuMsgTypeEnum.danmu;
-      sendDanmu();
+      sendDanmuTxt(danmuStr.value);
     }
-  }
-
-  function sendDanmu() {
-    if (!loginTip()) {
-      return;
-    }
-    if (!commentAuthTip()) {
-      return;
-    }
-    if (!danmuStr.value.trim().length) {
-      window.$message.warning('请输入弹幕内容！');
-      return;
-    }
-    const instance = networkStore.wsMap.get(roomId);
-    if (!instance) return;
-    const requestId = getRandomString(8);
-    console.log(isBilibili.value, isBilibili, 'isBilibili');
-    const messageData: WsMessageType['data'] = {
-      socket_id: '',
-      msg: danmuStr.value,
-      msgType: danmuMsgType.value,
-      live_room_id: Number(roomId),
-      msgIsFile: msgIsFile.value,
-      send_msg_time: +new Date(),
-      user_agent: navigator.userAgent,
-      isBilibili: isBilibili.value,
-    };
-    instance.send({
-      requestId,
-      msgType: WsMsgTypeEnum.message,
-      data: messageData,
-    });
-
-    danmuStr.value = '';
   }
 
   return {
     initWs,
+    initRtcReceive,
     videoWrapRef,
     handlePlay,
     handleStopDrawing,
@@ -490,7 +566,6 @@ export function usePull(roomId: string) {
     closeWs,
     closeRtc,
     keydownDanmu,
-    sendDanmu,
     showPlayBtn,
     danmuMsgType,
     isPlaying,
@@ -504,6 +579,7 @@ export function usePull(roomId: string) {
     damuList,
     liveUserList,
     danmuStr,
+    liveRoomInfo,
     anchorInfo,
   };
 }

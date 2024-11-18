@@ -9,12 +9,14 @@
         :border="!userStore.userInfo?.avatar?.length"
       ></Avatar>
     </div>
-    <div class="username">用户昵称：{{ userStore.userInfo?.username }}</div>
-    <div class="username">
+    <div>用户昵称：{{ userStore.userInfo?.username }}</div>
+    <div>
       用户角色：{{
         userStore.userInfo?.roles?.map((item) => item.role_name).join(',')
       }}
     </div>
+    <div>注册时间：{{ userStore.userInfo?.created_at }}</div>
+
     <br />
     <div class="pull-url">
       <span
@@ -45,6 +47,9 @@
           直播间分区：{{
             userStore.userInfo?.live_rooms?.[0]?.areas?.[0]?.name || '暂无分区'
           }}
+        </div>
+        <div>
+          开通时间：{{ userStore.userInfo?.live_rooms?.[0]?.created_at }}
         </div>
 
         <div
@@ -432,7 +437,7 @@ import { ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 
 import { fetchUpdateLiveRoomKey, fetchUpdateMyLiveRoom } from '@/api/liveRoom';
-import { DEFAULT_AUTH_INFO } from '@/constant';
+import { DEFAULT_AUTH_INFO, URL_QUERY } from '@/constant';
 import { loginTip } from '@/hooks/use-login';
 import { routerName } from '@/router';
 import { useUserStore } from '@/store/user';
@@ -475,7 +480,7 @@ function openLiveRoom() {
   }
   const url = router.resolve({
     name: routerName.push,
-    query: { liveType: LiveRoomTypeEnum.srs },
+    query: { [URL_QUERY.liveType]: LiveRoomTypeEnum.srs },
   });
   openToTarget(url.href);
 }

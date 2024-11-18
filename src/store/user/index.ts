@@ -52,11 +52,12 @@ export const useUserStore = defineStore('user', {
         return token;
       } catch (error: any) {
         // 错误返回401，全局的响应拦截会打印报错信息
+        console.log(error);
         return null;
       }
     },
     async updateMyWallet() {
-      const res = await fetchMyWallet();
+      const res = await fetchMyWallet({});
       if (res.code === 200) {
         if (this.userInfo?.wallet?.balance) {
           this.userInfo.wallet.balance = res.data.balance;

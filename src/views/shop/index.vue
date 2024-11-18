@@ -5,133 +5,212 @@
         v-for="(item, index) in tabList"
         :key="index"
         class="tab"
-        :class="{ active: item.key === currTab }"
+        :class="{ active: item.key === pageParams.type }"
         @click="changeTab(item.key)"
       >
         {{ item.label }}
       </div>
     </div>
     <div
+      ref="topRef"
+      :style="{ height: height + 'px' }"
       v-loading="loading"
-      class="goods-list"
     >
-      <div
-        v-for="(item, index) in list"
-        :key="index"
-        class="goods"
-        @click="startPay(item)"
+      <LongList
+        ref="longListRef"
+        class="goods-list"
+        @get-list-data="getListData"
+        :rootMargin="{
+          top: 0,
+          bottom: 0,
+          left: 0,
+          right: 0,
+        }"
+        :status="status"
       >
         <div
-          class="left"
-          v-lazy:background-image="item.cover"
+          v-for="(item, index) in list"
+          :key="index"
+          class="goods"
+          @click="handleBuy(item)"
         >
           <div
-            v-if="item.badge"
-            class="badge"
-            :style="{ backgroundColor: item.badge_bg }"
+            class="top"
+            v-lazy:background-image="item.cover"
           >
-            <div class="txt">{{ item.badge }}</div>
-          </div>
-        </div>
-        <div class="right">
-          <div class="title">{{ item.name }}</div>
-          <div class="info">100%好评</div>
-          <div class="desc">{{ item.desc }}</div>
-          <div class="price-wrap">
-            <span class="price">￥{{ formatMoney(item.price) }}</span>
-            <del
-              v-if="item.price !== item.original_price"
-              class="original-price"
+            <div
+              v-if="item.badge"
+              class="badge"
+              :style="{ backgroundColor: item.badge_bg }"
             >
-              {{ formatMoney(item.original_price) }}
-            </del>
+              <div class="txt">{{ item.badge }}</div>
+            </div>
+          </div>
+          <div class="bottom">
+            <div class="title">
+              <FloatTip
+                :txt="item.name"
+                :max-len="18"
+              ></FloatTip>
+            </div>
+            <div class="price-wrap">
+              <span class="rmb">￥</span>
+              <span class="price">{{ formatMoney(item.price!, true) }}</span>
+              <span
+                class="original-price"
+                v-if="item.original_price !== item.price"
+              >
+                <del>￥{{ formatMoney(item.original_price!, true) }}</del>
+              </span>
+              <span class="pay-num">
+                {{ formatPayNum(item.pay_nums!) }}人付款
+              </span>
+            </div>
           </div>
         </div>
-      </div>
+      </LongList>
     </div>
-    <QrPayCpt
+    <Modal
       v-if="showQrPay"
-      :money="goodsInfo.money"
-      :goods-id="goodsInfo.goodsId"
-      :live-room-id="goodsInfo.liveRoomId"
-    ></QrPayCpt>
+      title="支付"
+      @close="showQrPay = !showQrPay"
+    >
+      <QrPay
+        :money="qrcodeInfo.money"
+        :goods-id="qrcodeInfo.goodsId"
+        :live-room-id="qrcodeInfo.liveRoomId"
+      ></QrPay>
+      <template v-slot:footer></template>
+    </Modal>
   </div>
 </template>
 
 <script lang="ts" setup>
-import { nextTick, onMounted, reactive, ref } from 'vue';
+import { nextTick, onMounted, onUnmounted, reactive, ref } from 'vue';
 import { useRoute } from 'vue-router';
 
 import { fetchGoodsList } from '@/api/goods';
-import QrPayCpt from '@/components/QrPay/index.vue';
-import { URL_PARAMS } from '@/constant';
+import { URL_QUERY } from '@/constant';
 import { GoodsTypeEnum, IGoods } from '@/interface';
 import router from '@/router';
-import { formatMoney } from '@/utils';
+import { formatMoney, formatPayNum } from '@/utils';
 
 const route = useRoute();
 const list = ref<IGoods[]>([]);
+const topRef = ref<HTMLDivElement>();
 const loading = ref(false);
-const showQrPay = ref(false);
-const goodsInfo = reactive({
-  money: 0,
-  goodsId: -1,
-  liveRoomId: -1,
-});
 
 const tabList = ref([
+  // { label: '逸鹏的商品', key: GoodsTypeEnum.qypShop },
   { label: '礼物', key: GoodsTypeEnum.gift },
   { label: '赞助', key: GoodsTypeEnum.sponsors },
   { label: '服务', key: GoodsTypeEnum.support },
 ]);
 
-const currTab = ref(tabList.value[0].key);
+const height = ref(-1);
+const hasMore = ref(true);
 
-async function getGoodsList(type: GoodsTypeEnum) {
-  try {
-    loading.value = true;
-    const res = await fetchGoodsList({
-      type,
-      orderName: 'created_at',
-      orderBy: 'desc',
-    });
-    if (res.code === 200) {
-      list.value = res.data.rows;
-    }
-  } catch (error) {
-    console.log(error);
-  } finally {
-    loading.value = false;
-  }
-}
-
-onMounted(() => {
-  const key = route.query[URL_PARAMS.goodsType] as GoodsTypeEnum;
-  if (GoodsTypeEnum[key]) {
-    currTab.value = key;
-  } else {
-    router.push({ query: {} });
-  }
-  getGoodsList(currTab.value);
+const showQrPay = ref(false);
+const qrcodeInfo = reactive({
+  money: 0,
+  goodsId: -1,
+  liveRoomId: -1,
 });
 
-function changeTab(type: GoodsTypeEnum) {
-  showQrPay.value = false;
-  currTab.value = type;
-  getGoodsList(currTab.value);
+const pageParams = reactive({
+  nowPage: 0,
+  pageSize: 100,
+  type: tabList.value[0].key,
+  orderName: 'price,created_at',
+  orderBy: 'asc,desc',
+});
+
+const status = ref<'loading' | 'nonedata' | 'allLoaded' | 'normal'>('loading');
+
+function handleStatus() {
+  if (loading.value) {
+    status.value = 'loading';
+  } else if (hasMore.value) {
+    status.value = 'normal';
+  } else {
+    status.value = 'allLoaded';
+  }
+  if (!list.value?.length) {
+    status.value = 'nonedata';
+  }
 }
 
-function startPay(item: IGoods) {
+function handleBuy(item: IGoods) {
+  console.log('i', item);
   if (item.price! <= 0) {
     window.$message.info('该商品是免费的，不需要购买！');
     return;
   }
   showQrPay.value = false;
   nextTick(() => {
-    goodsInfo.money = item.price!;
-    goodsInfo.goodsId = item.id!;
+    qrcodeInfo.money = item.price!;
+    qrcodeInfo.goodsId = item.id!;
     showQrPay.value = true;
   });
+}
+
+function getHeight() {
+  if (topRef.value) {
+    height.value =
+      document.documentElement.clientHeight -
+      topRef.value.getBoundingClientRect().top;
+  }
+}
+
+function getListData() {
+  if (!hasMore.value) return;
+  getData();
+}
+
+async function getData(clear = false) {
+  try {
+    loading.value = true;
+    status.value = 'loading';
+    pageParams.nowPage += 1;
+    const res = await fetchGoodsList({
+      ...pageParams,
+    });
+    if (res.code === 200) {
+      if (clear) {
+        list.value = res.data.rows;
+      } else {
+        list.value.push(...res.data.rows);
+      }
+      hasMore.value = res.data.hasMore;
+    }
+  } catch (error) {
+    pageParams.nowPage -= 1;
+    console.log(error);
+  }
+  loading.value = false;
+  status.value = 'normal';
+  handleStatus();
+}
+
+onMounted(() => {
+  getHeight();
+  window.addEventListener('resize', getHeight);
+  const key = route.query[URL_QUERY.goodsType] as GoodsTypeEnum;
+  if (GoodsTypeEnum[key] !== undefined) {
+    pageParams.type = key;
+  } else {
+    router.push({ query: {} });
+  }
+});
+
+onUnmounted(() => {
+  window.removeEventListener('resize', getHeight);
+});
+
+function changeTab(type: GoodsTypeEnum) {
+  pageParams.type = type;
+  pageParams.nowPage = 0;
+  getData(true);
 }
 </script>
 
@@ -171,11 +250,13 @@ function startPay(item: IGoods) {
   .goods-list {
     display: flex;
     flex-wrap: wrap;
+    align-content: baseline;
+    justify-content: space-between;
     .goods {
       display: flex;
       box-sizing: border-box;
-      margin-right: 20px;
-      margin-bottom: 20px;
+      margin-right: 10px;
+      margin-bottom: 15px;
       padding: 18px 10px 10px;
       width: 400px;
       border-radius: 6px;
@@ -185,11 +266,12 @@ function startPay(item: IGoods) {
       &:hover {
         box-shadow: 4px 4px 20px 0 rgba(205, 216, 228, 0.6);
       }
-      .left {
+      .top {
         position: relative;
         margin-right: 20px;
         width: 100px;
         height: 100px;
+        flex-shrink: 0;
         @extend %containBg;
         .badge {
           position: absolute;
@@ -210,22 +292,30 @@ function startPay(item: IGoods) {
           }
         }
       }
-      .right {
+      .bottom {
         .title {
+          margin-top: 10px;
           font-size: 22px;
-        }
-        .info {
         }
         .price-wrap {
           display: flex;
-          align-items: center;
+          align-items: baseline;
+          margin-top: 8px;
+          color: $theme-color-gold;
+          .rmb {
+            font-size: 16px;
+          }
           .price {
-            color: $theme-color-gold;
-            font-size: 22px;
+            font-weight: 500;
+            font-size: 28px;
           }
           .original-price {
+            color: #999;
+            font-size: 14px;
+          }
+          .pay-num {
             margin-left: 5px;
-            color: #666;
+            color: #999;
             font-size: 14px;
           }
         }

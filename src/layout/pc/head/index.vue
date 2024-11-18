@@ -103,36 +103,17 @@
           <template #list>
             <div class="list">
               <a
+                v-for="(item, index) in docList"
+                :key="index"
+                :href="item.url"
                 class="item"
-                @click="handleTip"
+                @click.prevent="handleJump(item)"
               >
-                <div class="txt">{{ t('layout.guide') }}</div>
-              </a>
-              <a
-                class="item"
-                :href="COMMON_URL.apifox"
-                @click.prevent="openToTarget(COMMON_URL.apifox)"
-              >
-                <div class="txt">{{ t('layout.apiDoc') }}</div>
-                <VPIconExternalLink class="icon"></VPIconExternalLink>
-              </a>
-              <a
-                class="item"
-                :href="COMMON_URL.bilibiliCollectiondetail"
-                @click.prevent="
-                  openToTarget(COMMON_URL.bilibiliCollectiondetail)
-                "
-              >
-                <div class="txt">{{ t('layout.bilibiliTutorial') }}</div>
-                <VPIconExternalLink class="icon"></VPIconExternalLink>
-              </a>
-              <a
-                class="item"
-                :href="COMMON_URL.payCoursesArticle"
-                @click.prevent="openToTarget(COMMON_URL.payCoursesArticle)"
-              >
-                <div class="txt">{{ t('layout.vipCourses') }}</div>
-                <VPIconExternalLink class="icon"></VPIconExternalLink>
+                <div class="txt">{{ t(item.label) }}</div>
+                <VPIconExternalLink
+                  class="icon"
+                  v-if="item.url"
+                ></VPIconExternalLink>
               </a>
             </div>
           </template>
@@ -152,7 +133,7 @@
             <div class="list">
               <div class="title">{{ t('layout.resource') }}</div>
               <a
-                v-for="(item, index) in resource"
+                v-for="(item, index) in resourceList"
                 :key="index"
                 :href="item.url"
                 class="item"
@@ -196,15 +177,11 @@
           <template #list>
             <div class="list">
               <a
-                v-for="(item, index) in about"
+                v-for="(item, index) in aboutList"
                 :key="index"
                 class="item"
                 :href="item.url"
-                @click.prevent="
-                  item.routerName
-                    ? router.push({ name: item.routerName })
-                    : openToTarget(item.url)
-                "
+                @click.prevent="handleJump(item)"
               >
                 <div class="txt">{{ t(item.label) }}</div>
                 <VPIconExternalLink
@@ -287,7 +264,7 @@
               </a>
               <a
                 class="item"
-                @click.prevent="handleStartLive(LiveRoomTypeEnum.pk)"
+                @click.prevent="handleTip2()"
               >
                 <div class="txt">{{ t('layout.pkLive') }}</div>
               </a>
@@ -407,7 +384,7 @@
         >
           <template #btn>
             <div class="btn">
-              {{ localeMap[locale] }}
+              {{ localeList.find((v) => v.value === cacheStore.locale)?.label }}
               <VPIconChevronDown class="icon"></VPIconChevronDown>
             </div>
           </template>
@@ -415,12 +392,12 @@
             <div class="list">
               <a
                 class="item"
-                v-for="(item, index) in localeMap"
+                v-for="(item, index) in localeList"
                 :key="index"
-                :class="{ active: item === localeMap[locale] }"
-                @click="locale = index"
+                :class="{ active: item.value === cacheStore.locale }"
+                @click="changeLocale(item)"
               >
-                <div class="txt">{{ item }}</div>
+                <div class="txt">{{ item.label }}</div>
               </a>
             </div>
           </template>
@@ -440,11 +417,12 @@ import { fetchCreateSignin, fetchTodayIsSignin } from '@/api/signin';
 import Dropdown from '@/components/Dropdown/index.vue';
 import VPIconChevronDown from '@/components/icons/VPIconChevronDown.vue';
 import VPIconExternalLink from '@/components/icons/VPIconExternalLink.vue';
-import { COMMON_URL, DEFAULT_AUTH_INFO } from '@/constant';
+import { COMMON_URL, DEFAULT_AUTH_INFO, URL_QUERY } from '@/constant';
 import { handleTip } from '@/hooks/use-common';
 import { loginTip } from '@/hooks/use-login';
 import { routerName } from '@/router';
 import { useAppStore } from '@/store/app';
+import { useCacheStore } from '@/store/cache';
 import { useUserStore } from '@/store/user';
 import { LiveRoomTypeEnum } from '@/types/ILiveRoom';
 
@@ -452,19 +430,41 @@ const { t, locale } = useI18n();
 const router = useRouter();
 const userStore = useUserStore();
 const appStore = useAppStore();
+const cacheStore = useCacheStore();
 const githubStar = ref('');
 
-const localeMap = {
-  zh: '中文',
-  en: 'English',
-};
+const localeList = [
+  { label: '中文', value: 'zh' },
+  { label: 'English', value: 'en' },
+];
 
-const about = ref([
+const docList = ref([
+  {
+    label: 'layout.guide',
+    routerName: routerName.guide,
+    url: '',
+  },
+  {
+    label: 'layout.apiDoc',
+    routerName: routerName.api,
+    url: '',
+  },
   {
     label: 'layout.faq',
     routerName: routerName.faq,
     url: '',
   },
+  {
+    label: 'layout.vipCourses',
+    url: COMMON_URL.payCoursesArticle,
+  },
+  {
+    label: 'layout.bilibiliTutorial',
+    url: COMMON_URL.bilibiliCollectiondetail,
+  },
+]);
+
+const aboutList = ref([
   {
     label: 'layout.team',
     routerName: routerName.team,
@@ -476,13 +476,13 @@ const about = ref([
     url: '',
   },
   {
-    label: 'layout.officialGroup',
-    routerName: routerName.group,
+    label: 'layout.sponsor',
+    routerName: routerName.sponsors,
     url: '',
   },
   {
-    label: 'layout.sponsor',
-    routerName: routerName.sponsors,
+    label: 'layout.officialGroup',
+    routerName: routerName.group,
     url: '',
   },
   {
@@ -492,7 +492,7 @@ const about = ref([
   },
 ]);
 
-const resource = ref([
+const resourceList = ref([
   {
     label: 'billd-live',
     url: 'https://github.com/galaxy-s10/billd-live',
@@ -596,6 +596,11 @@ async function initSigninStatus() {
   }
 }
 
+function changeLocale(item) {
+  locale.value = item.value;
+  cacheStore.locale = item.value;
+}
+
 function handleLogout() {
   userStore.logout();
   setTimeout(() => {
@@ -604,7 +609,9 @@ function handleLogout() {
 }
 
 function handleJump(item) {
-  if (item.url) {
+  if (item.routerName) {
+    router.push({ name: item.routerName });
+  } else if (item.url) {
     openToTarget(item.url);
   } else {
     handleTip();
@@ -612,9 +619,14 @@ function handleJump(item) {
 }
 
 onMounted(() => {
+  locale.value = cacheStore.locale;
   githubStar.value =
     'https://img.shields.io/github/stars/galaxy-s10/billd-live?label=Star&logo=GitHub&labelColor=white&logoColor=black&style=social&cacheSeconds=3600';
 });
+
+function handleTip2() {
+  window.$message.warning('重构中，暂不开放');
+}
 
 function handleStartLive(key: LiveRoomTypeEnum) {
   if (!loginTip()) {
@@ -677,7 +689,7 @@ function handleStartLive(key: LiveRoomTypeEnum) {
   }
   const url = router.resolve({
     name: routerName.push,
-    query: { liveType: key },
+    query: { [URL_QUERY.liveType]: key },
   });
   openToTarget(url.href);
 }
@@ -727,6 +739,7 @@ function handleWebsiteJump() {
         color: black;
         text-decoration: none;
         cursor: pointer;
+        &.active,
         &:hover {
           color: $theme-color-gold;
         }
